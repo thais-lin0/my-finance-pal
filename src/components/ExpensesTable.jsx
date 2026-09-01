@@ -9,6 +9,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, formatBRL, formatDateBR, dueStatus } from '../lib/format'
+import EditableCell from './EditableCell'
 
 const dueClasses = {
   overdue: 'text-coral font-semibold',
@@ -22,6 +23,7 @@ export default function ExpensesTable({
   onTogglePaid,
   onDelete,
   onEdit,
+  onInlineSave,
   onBulkUpdate,
   onBulkDelete,
 }) {
@@ -54,6 +56,7 @@ export default function ExpensesTable({
     out = [...out].sort((a, b) => {
       if (key === 'amount') return (Number(a.amount) - Number(b.amount)) * mul
       if (key === 'description') return a.description.localeCompare(b.description) * mul
+      if (key === 'category') return a.category.localeCompare(b.category) * mul
       // due_date (nulls por último)
       const av = a.due_date || '9999-12-31'
       const bv = b.due_date || '9999-12-31'
@@ -189,7 +192,9 @@ export default function ExpensesTable({
               <th className="cursor-pointer py-2 pr-3 select-none" onClick={() => toggleSort('description')}>
                 <span className="inline-flex items-center gap-1">Item <ArrowUpDown size={11} /></span>
               </th>
-              <th className="py-2 pr-3">Tipo</th>
+              <th className="cursor-pointer py-2 pr-3 select-none" onClick={() => toggleSort('category')}>
+                <span className="inline-flex items-center gap-1">Tipo <ArrowUpDown size={11} /></span>
+              </th>
               <th className="cursor-pointer py-2 pr-3 select-none" onClick={() => toggleSort('due_date')}>
                 <span className="inline-flex items-center gap-1">Vencimento <ArrowUpDown size={11} /></span>
               </th>
@@ -224,26 +229,54 @@ export default function ExpensesTable({
                     />
                   </td>
                   <td className="py-2.5 pr-3 font-medium text-slate-800 dark:text-slate-100">
-                    {e.description}
-                    {e.is_recurring && (
-                      <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-brand-600 dark:bg-brand-900/40">
-                        fixo
-                      </span>
-                    )}
+                    <span className="inline-flex items-center gap-2">
+                      <EditableCell
+                        value={e.description}
+                        onSave={(v) => onInlineSave(e.id, { description: String(v).trim() })}
+                      />
+                      {e.is_recurring && (
+                        <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-brand-600 dark:bg-brand-900/40">
+                          fixo
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="py-2.5 pr-3">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-ink-800 dark:text-slate-300">
-                      {e.category}
-                    </span>
+                    <EditableCell
+                      type="select"
+                      value={e.category}
+                      options={EXPENSE_CATEGORIES}
+                      onSave={(v) => onInlineSave(e.id, { category: v })}
+                      display={
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-ink-800 dark:text-slate-300">
+                          {e.category}
+                        </span>
+                      }
+                    />
                   </td>
                   <td className={`py-2.5 pr-3 ${dueClasses[st]}`}>
-                    <span className="inline-flex items-center gap-1">
-                      {st === 'overdue' && <AlertTriangle size={13} />}
-                      {st === 'soon' && <Clock size={13} />}
-                      {formatDateBR(e.due_date)}
-                    </span>
+                    <EditableCell
+                      type="date"
+                      value={e.due_date || ''}
+                      onSave={(v) => onInlineSave(e.id, { due_date: v || null })}
+                      display={
+                        <span className="inline-flex items-center gap-1">
+                          {st === 'overdue' && <AlertTriangle size={13} />}
+                          {st === 'soon' && <Clock size={13} />}
+                          {formatDateBR(e.due_date)}
+                        </span>
+                      }
+                    />
                   </td>
-                  <td className="py-2.5 pr-3 text-right font-semibold tnum">{formatBRL(e.amount)}</td>
+                  <td className="py-2.5 pr-3 text-right font-semibold tnum">
+                    <EditableCell
+                      type="number"
+                      align="right"
+                      value={e.amount}
+                      onSave={(v) => onInlineSave(e.id, { amount: v })}
+                      display={formatBRL(e.amount)}
+                    />
+                  </td>
                   <td className="py-2.5 pr-3 text-center">
                     <button
                       onClick={() => onTogglePaid(e.id, !e.is_paid)}
@@ -257,7 +290,13 @@ export default function ExpensesTable({
                       <Check size={14} />
                     </button>
                   </td>
-                  <td className="py-2.5 pr-3 text-slate-400">{e.notes || '—'}</td>
+                  <td className="py-2.5 pr-3 text-slate-400">
+                    <EditableCell
+                      value={e.notes || ''}
+                      onSave={(v) => onInlineSave(e.id, { notes: String(v).trim() || null })}
+                      display={e.notes || '—'}
+                    />
+                  </td>
                   <td className="py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button

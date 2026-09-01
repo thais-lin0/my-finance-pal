@@ -44,7 +44,22 @@ create table if not exists public.savings (
   user_id      uuid not null references auth.users (id) on delete cascade,
   kind         text not null default 'Daily', -- tipo de poupança
   amount       numeric(12, 2) not null default 0,
+  investment_id uuid,                          -- link para o aporte espelhado em investments
   ref_month    date not null,
+  created_at   timestamptz not null default now()
+);
+
+-- ─────────────────────────────────────────────
+--  INVESTIMENTOS (patrimônio acumulado, não por mês)
+-- ─────────────────────────────────────────────
+create table if not exists public.investments (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  name         text not null,                  -- "CDB Banco Inter", "Tesouro Selic"...
+  kind         text not null default 'CDB',    -- CDB, Tesouro, Ações, FII, Poupança, Outros
+  amount       numeric(12, 2) not null default 0,
+  invested_at  date not null default current_date, -- data do aporte
+  source       text not null default 'manual', -- 'manual' | 'savings' (espelho da poupança)
   created_at   timestamptz not null default now()
 );
 
@@ -54,6 +69,7 @@ create table if not exists public.savings (
 create index if not exists idx_incomes_user_month  on public.incomes  (user_id, ref_month);
 create index if not exists idx_expenses_user_month  on public.expenses (user_id, ref_month);
 create index if not exists idx_savings_user_month   on public.savings  (user_id, ref_month);
+create index if not exists idx_investments_user      on public.investments (user_id, invested_at);
 
 -- ══════════════════════════════════════════════════════════════════
 --  ROW LEVEL SECURITY
@@ -62,6 +78,7 @@ create index if not exists idx_savings_user_month   on public.savings  (user_id,
 alter table public.incomes  enable row level security;
 alter table public.expenses enable row level security;
 alter table public.savings  enable row level security;
+alter table public.investments enable row level security;
 
 -- INCOMES
 drop policy if exists "incomes_select_own" on public.incomes;
@@ -112,4 +129,21 @@ create policy "savings_update_own" on public.savings
 
 drop policy if exists "savings_delete_own" on public.savings;
 create policy "savings_delete_own" on public.savings
+  for delete using (auth.uid() = user_id);
+
+-- INVESTMENTS
+drop policy if exists "investments_select_own" on public.investments;
+create policy "investments_select_own" on public.investments
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "investments_insert_own" on public.investments;
+create policy "investments_insert_own" on public.investments
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "investments_update_own" on public.investments;
+create policy "investments_update_own" on public.investments
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "investments_delete_own" on public.investments;
+create policy "investments_delete_own" on public.investments
   for delete using (auth.uid() = user_id);

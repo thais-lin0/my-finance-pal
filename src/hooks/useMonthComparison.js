@@ -73,7 +73,16 @@ export function useMonthComparison(refMonth) {
       balance: pct(totals.balanceCur, totals.balancePrev),
     }
 
-    return { byCategory, totals, deltas }
+    // maior variação de gasto por categoria (para anotar o insight)
+    let topMover = null
+    for (const c of byCategory) {
+      const diff = c.atual - c.anterior
+      if (!topMover || Math.abs(diff) > Math.abs(topMover.diff)) {
+        topMover = { name: c.name, diff, atual: c.atual, anterior: c.anterior }
+      }
+    }
+
+    return { byCategory, totals, deltas, topMover }
   }, [current, previous])
 
   return { ...data, loading, reload: load }

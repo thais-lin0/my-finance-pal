@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard,
   Wallet,
+  TrendingUp,
   Moon,
   Sun,
   LogOut,
@@ -14,6 +15,7 @@ import { useAuth } from '../context/AuthContext'
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/financas', label: 'Finanças', icon: Wallet },
+  { to: '/investimentos', label: 'Investimentos', icon: TrendingUp },
 ]
 
 export default function AppLayout({ dark, onToggleTheme }) {

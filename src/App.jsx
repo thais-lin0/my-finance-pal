@@ -7,6 +7,7 @@ import AppLayout from './components/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import FinancasPage from './pages/FinancasPage'
+import InvestimentosPage from './pages/InvestimentosPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -58,6 +59,7 @@ export default function App() {
           >
             <Route path="/" element={<DashboardPage />} />
             <Route path="/financas" element={<FinancasPage />} />
+            <Route path="/investimentos" element={<InvestimentosPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

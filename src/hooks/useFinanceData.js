@@ -1,21 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { prevMonthKey } from '../lib/format'
-
-// Reaproveita o dia do vencimento antigo no mês de referência atual.
-// Ex: due antigo 05/09 + refMonth 2026-10-01 -> 2026-10-05.
-function shiftDueDate(oldDue, refMonth) {
-  if (!oldDue) return null
-  const day = new Date(oldDue + 'T00:00:00').getDate()
-  const base = new Date(refMonth + 'T00:00:00')
-  // clamp para não estourar em meses curtos (ex: dia 31 em fevereiro)
-  const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate()
-  const safeDay = Math.min(day, lastDay)
-  const m = String(base.getMonth() + 1).padStart(2, '0')
-  const d = String(safeDay).padStart(2, '0')
-  return `${base.getFullYear()}-${m}-${d}`
-}
+import { defaultDueDate, prevMonthKey } from '../lib/format'
 
 // Carrega e gerencia receitas, despesas e poupança de um mês de referência.
 export function useFinanceData(refMonth) {
@@ -106,9 +92,25 @@ export function useFinanceData(refMonth) {
   }
 
   const addSaving = async (payload) => {
+    // espelha a poupança como um aporte em investments (origem 'savings')
+    const investedAt = refMonth.slice(0, 8) + '07' // dia 7 do mês de referência
+    const { data: inv, error: invErr } = await supabase
+      .from('investments')
+      .insert({
+        user_id: user.id,
+        name: payload.kind || 'Poupança',
+        kind: 'Poupança',
+        amount: payload.amount ?? 0,
+        invested_at: investedAt,
+        source: 'savings',
+      })
+      .select('id')
+      .single()
+    if (invErr) throw invErr
+
     const { error } = await supabase
       .from('savings')
-      .insert({ ...payload, user_id: user.id, ref_month: refMonth })
+      .insert({ ...payload, user_id: user.id, ref_month: refMonth, investment_id: inv.id })
     if (error) throw error
     await load()
     await loadSuggestions()
@@ -121,6 +123,13 @@ export function useFinanceData(refMonth) {
   }
 
   const removeRow = async (table, id) => {
+    // se for poupança espelhada, remove também o aporte vinculado
+    if (table === 'savings') {
+      const sav = savings.find((s) => s.id === id)
+      if (sav?.investment_id) {
+        await supabase.from('investments').delete().eq('id', sav.investment_id)
+      }
+    }
     const { error } = await supabase.from(table).delete().eq('id', id)
     if (error) throw error
     await load()
@@ -130,6 +139,17 @@ export function useFinanceData(refMonth) {
   const updateRow = async (table, id, patch) => {
     const { error } = await supabase.from(table).update(patch).eq('id', id)
     if (error) throw error
+    // mantém o aporte espelhado em sincronia com a poupança
+    if (table === 'savings') {
+      const sav = savings.find((s) => s.id === id)
+      if (sav?.investment_id) {
+        const invPatch = {}
+        if (patch.amount !== undefined) invPatch.amount = patch.amount
+        if (patch.kind !== undefined) invPatch.name = patch.kind
+        if (Object.keys(invPatch).length)
+          await supabase.from('investments').update(invPatch).eq('id', sav.investment_id)
+      }
+    }
     await load()
     if (table !== 'savings') await loadSuggestions()
   }
@@ -192,8 +212,8 @@ export function useFinanceData(refMonth) {
         description: e.description,
         category: e.category,
         amount: e.amount,
-        // desloca o vencimento para o mesmo dia no mês atual
-        due_date: shiftDueDate(e.due_date, refMonth),
+        // vencimento padrão dia 7 do mês atual (você paga tudo até o dia 7)
+        due_date: defaultDueDate(refMonth),
         notes: e.notes,
         is_recurring: true,
         is_paid: false,

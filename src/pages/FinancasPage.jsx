@@ -98,6 +98,26 @@ export default function FinancasPage() {
         ))}
       </section>
 
+      {/* progresso de pagamento do mês */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card dark:border-ink-800 dark:bg-ink-900">
+        <div className="mb-2 flex items-center justify-between text-sm">
+          <span className="font-medium text-slate-600 dark:text-slate-300">
+            Pago <span className="tnum font-semibold">{formatBRL(totals.paid)}</span> de{' '}
+            <span className="tnum">{formatBRL(totals.totalExpenses)}</span>
+          </span>
+          <span className="text-slate-400">{totals.paidPct}%</span>
+        </div>
+        <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
+          <div
+            className="h-full rounded-full bg-money transition-all"
+            style={{ width: `${totals.paidPct}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          Restante a pagar: <span className="tnum">{formatBRL(totals.remaining)}</span>
+        </p>
+      </section>
+
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card dark:border-ink-800 dark:bg-ink-900">
           <div className="mb-2 flex items-center justify-between">
@@ -155,6 +175,7 @@ export default function FinancasPage() {
           onTogglePaid={fin.toggleExpensePaid}
           onDelete={fin.removeRow}
           onEdit={editExpense}
+          onInlineSave={(id, patch) => fin.updateRow('expenses', id, patch)}
           onBulkUpdate={fin.bulkUpdate}
           onBulkDelete={fin.bulkDelete}
         />
