@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { MonthProvider } from './context/MonthContext'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -63,6 +64,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <Analytics />
       </MonthProvider>
     </AuthProvider>
   )

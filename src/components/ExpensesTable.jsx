@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Check,
   Trash2,
@@ -7,6 +7,8 @@ import {
   ArrowUpDown,
   AlertTriangle,
   Clock,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, formatBRL, formatDateBR, dueStatus } from '../lib/format'
 import EditableCell from './EditableCell'
@@ -33,6 +35,8 @@ export default function ExpensesTable({
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState({ key: 'due_date', dir: 'asc' })
   const [selected, setSelected] = useState(() => new Set())
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
   const rows = useMemo(() => {
     let out = expenses.filter((e) => {
@@ -70,6 +74,21 @@ export default function ExpensesTable({
     const pending = rows.filter((e) => !e.is_paid).length
     return { count: rows.length, total, pending }
   }, [rows])
+
+  // paginação
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const pagedRows = useMemo(
+    () => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [rows, currentPage, pageSize]
+  )
+  const from = rows.length === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const to = Math.min(currentPage * pageSize, rows.length)
+
+  // volta para a página 1 quando filtros/busca/ordenação/tamanho mudam
+  useEffect(() => {
+    setPage(1)
+  }, [catFilter, statusFilter, dueFilter, query, sort, pageSize])
 
   const toggleSort = (key) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
@@ -214,7 +233,7 @@ export default function ExpensesTable({
                 </td>
               </tr>
             )}
-            {rows.map((e) => {
+            {pagedRows.map((e) => {
               const st = dueStatus(e.due_date, e.is_paid)
               return (
                 <tr
@@ -324,12 +343,53 @@ export default function ExpensesTable({
         </table>
       </div>
 
-      {/* resumo do filtrado */}
+      {/* resumo + paginação */}
       {rows.length > 0 && (
-        <p className="mt-3 text-xs text-slate-400">
-          {summary.count} despesa(s) · <span className="tnum">{formatBRL(summary.total)}</span> ·{' '}
-          {summary.pending} pendente(s)
-        </p>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-400">
+            Mostrando {from}–{to} de {summary.count} · <span className="tnum">{formatBRL(summary.total)}</span>{' '}
+            · {summary.pending} pendente(s)
+          </p>
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              Por página
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-ink-700 dark:bg-ink-800"
+              >
+                {[10, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-ink-700 dark:hover:bg-ink-800"
+                title="Página anterior"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="min-w-[72px] text-center text-xs text-slate-500 dark:text-slate-400">
+                {currentPage} / {pageCount}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={currentPage >= pageCount}
+                className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 dark:border-ink-700 dark:hover:bg-ink-800"
+                title="Próxima página"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
