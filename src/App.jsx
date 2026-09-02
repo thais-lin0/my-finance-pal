@@ -3,12 +3,15 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { MonthProvider } from './context/MonthContext'
+import { WeekProvider } from './context/WeekContext'
 import { isSupabaseConfigured } from './lib/supabase'
 import AppLayout from './components/AppLayout'
 import LoginPage from './pages/LoginPage'
+import HomePage from './pages/HomePage'
 import DashboardPage from './pages/DashboardPage'
 import FinancasPage from './pages/FinancasPage'
 import InvestimentosPage from './pages/InvestimentosPage'
+import AgendaPage from './pages/AgendaPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -49,22 +52,26 @@ export default function App() {
   return (
     <AuthProvider>
       <MonthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <AppLayout dark={dark} onToggleTheme={() => setDark((d) => !d)} />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/financas" element={<FinancasPage />} />
-            <Route path="/investimentos" element={<InvestimentosPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        <Analytics />
+        <WeekProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout dark={dark} onToggleTheme={() => setDark((d) => !d)} />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<HomePage />} />
+              <Route path="/financeiro" element={<DashboardPage />} />
+              <Route path="/financeiro/financas" element={<FinancasPage />} />
+              <Route path="/financeiro/investimentos" element={<InvestimentosPage />} />
+              <Route path="/agenda" element={<AgendaPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+          <Analytics />
+        </WeekProvider>
       </MonthProvider>
     </AuthProvider>
   )

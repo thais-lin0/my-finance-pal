@@ -64,12 +64,31 @@ create table if not exists public.investments (
 );
 
 -- ─────────────────────────────────────────────
+--  AGENDA (planejamento semanal de atividades — módulo Vida)
+-- ─────────────────────────────────────────────
+create table if not exists public.activities (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  week_start  date not null,                 -- segunda-feira da semana
+  weekday     smallint not null default 0,   -- 0=Seg ... 6=Dom
+  title       text not null,
+  category    text not null default 'Treino',
+  start_time  time,
+  end_time    time,
+  notes       text,
+  status      text not null default 'pendente', -- pendente | feito | nao_realizado
+  is_recurring boolean not null default false,   -- atividade fixa (repete toda semana)
+  created_at  timestamptz not null default now()
+);
+
+-- ─────────────────────────────────────────────
 --  Índices para consulta por usuário + mês
 -- ─────────────────────────────────────────────
 create index if not exists idx_incomes_user_month  on public.incomes  (user_id, ref_month);
 create index if not exists idx_expenses_user_month  on public.expenses (user_id, ref_month);
 create index if not exists idx_savings_user_month   on public.savings  (user_id, ref_month);
 create index if not exists idx_investments_user      on public.investments (user_id, invested_at);
+create index if not exists idx_activities_user_week  on public.activities (user_id, week_start);
 
 -- ══════════════════════════════════════════════════════════════════
 --  ROW LEVEL SECURITY
@@ -79,6 +98,7 @@ alter table public.incomes  enable row level security;
 alter table public.expenses enable row level security;
 alter table public.savings  enable row level security;
 alter table public.investments enable row level security;
+alter table public.activities enable row level security;
 
 -- INCOMES
 drop policy if exists "incomes_select_own" on public.incomes;
@@ -146,4 +166,21 @@ create policy "investments_update_own" on public.investments
 
 drop policy if exists "investments_delete_own" on public.investments;
 create policy "investments_delete_own" on public.investments
+  for delete using (auth.uid() = user_id);
+
+-- ACTIVITIES
+drop policy if exists "activities_select_own" on public.activities;
+create policy "activities_select_own" on public.activities
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "activities_insert_own" on public.activities;
+create policy "activities_insert_own" on public.activities
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "activities_update_own" on public.activities;
+create policy "activities_update_own" on public.activities
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "activities_delete_own" on public.activities;
+create policy "activities_delete_own" on public.activities
   for delete using (auth.uid() = user_id);

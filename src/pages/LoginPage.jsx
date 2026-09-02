@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Wallet } from 'lucide-react'
+import { Home } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
@@ -41,13 +41,13 @@ export default function LoginPage() {
       <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl dark:bg-ink-900">
         <div className="mb-6 flex items-center gap-3">
           <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-600 text-white">
-            <Wallet size={26} />
+            <Home size={26} />
           </div>
           <div>
             <h1 className="font-display text-xl font-bold text-slate-900 dark:text-white">
-              Finance Pal
+              My Life Pal
             </h1>
-            <p className="text-sm text-slate-500">Seu controle financeiro pessoal</p>
+            <p className="text-sm text-slate-500">Seu painel de vida</p>
           </div>
         </div>
 

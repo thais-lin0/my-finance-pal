@@ -93,6 +93,46 @@ export function dueStatus(dueDate, isPaid, today = new Date()) {
   return 'ok'
 }
 
+// ── Semana (módulo Agenda) ──────────────────────────────
+
+// Retorna a segunda-feira (YYYY-MM-DD) da semana que contém `date`.
+export function mondayOf(date = new Date()) {
+  const d = new Date(date)
+  const day = (d.getDay() + 6) % 7 // 0=Seg ... 6=Dom
+  d.setDate(d.getDate() - day)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Soma dias a uma chave YYYY-MM-DD.
+export function addDays(key, n) {
+  const d = new Date(key + 'T00:00:00')
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// "2026-09-07" -> "07/09 – 13/09"
+export function weekLabel(mondayKey) {
+  const sun = addDays(mondayKey, 6)
+  const fmt = (k) => {
+    const d = new Date(k + 'T00:00:00')
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
+  return `${fmt(mondayKey)} – ${fmt(sun)}`
+}
+
+// Lista N semanas a partir de uma âncora, mais recente primeiro.
+export function recentWeeks(count = 8, from = new Date()) {
+  const base = mondayOf(from)
+  const out = []
+  for (let i = 0; i < count; i++) out.push(addDays(base, -7 * i))
+  return out
+}
+
+export const WEEKDAYS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+export const WEEKDAYS_SHORT = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+
+export const ACTIVITY_CATEGORIES = ['Treino', 'Academia', 'Futebol', 'Corrida', 'Estudo', 'Trabalho', 'Lazer', 'Outro']
+
 export const EXPENSE_CATEGORIES = [
   'Carro',
   'Cartão de crédito',
