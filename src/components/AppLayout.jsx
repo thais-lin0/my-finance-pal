@@ -33,7 +33,7 @@ const groups = [
     label: 'Vida',
     items: [
       { to: '/agenda', label: 'Agenda', icon: CalendarDays },
-      { to: '#', label: 'Nutrição', icon: Salad, disabled: true },
+      { to: '/nutricao', label: 'Nutrição', icon: Salad },
     ],
   },
 ]

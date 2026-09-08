@@ -95,6 +95,12 @@ export function dueStatus(dueDate, isPaid, today = new Date()) {
 
 // ── Semana (módulo Agenda) ──────────────────────────────
 
+// Data de hoje como chave YYYY-MM-DD (local).
+export function todayKey() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // Retorna a segunda-feira (YYYY-MM-DD) da semana que contém `date`.
 export function mondayOf(date = new Date()) {
   const d = new Date(date)

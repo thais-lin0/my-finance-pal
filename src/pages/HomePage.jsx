@@ -19,12 +19,12 @@ const modules = [
     available: true,
   },
   {
-    to: '#',
+    to: '/nutricao',
     title: 'Nutrição',
-    desc: 'Refeições, metas e acompanhamento alimentar.',
+    desc: 'Diário alimentar, metas, cardápio, compras e medidas.',
     icon: Salad,
     tint: 'from-amber to-orange-500',
-    available: false,
+    available: true,
   },
 ]
 
