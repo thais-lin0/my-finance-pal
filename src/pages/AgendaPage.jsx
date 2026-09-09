@@ -3,35 +3,18 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
-  Check,
-  X,
-  Pencil,
-  Trash2,
   CalendarDays,
-  Clock,
   RefreshCw,
+  Rows3,
+  Columns3,
 } from 'lucide-react'
 import { useWeek } from '../context/WeekContext'
 import { useAgenda } from '../hooks/useAgenda'
 import { WEEKDAYS, WEEKDAYS_SHORT, weekLabel, addDays, mondayOf } from '../lib/format'
 import AddActivityModal from '../components/AddActivityModal'
+import ActivityCard from '../components/ActivityCard'
 
-const catColor = {
-  Treino: 'border-l-brand-500',
-  Academia: 'border-l-violet-500',
-  Futebol: 'border-l-money',
-  Corrida: 'border-l-amber',
-  Estudo: 'border-l-cyan-500',
-  Trabalho: 'border-l-slate-400',
-  Lazer: 'border-l-pink-500',
-  Outro: 'border-l-slate-300',
-}
-
-const statusRing = {
-  feito: 'opacity-60',
-  nao_realizado: 'opacity-50 line-through',
-  pendente: '',
-}
+const todayIdx = () => (new Date().getDay() + 6) % 7 // 0=Seg
 
 export default function AgendaPage() {
   const { weekStart, prevWeek, nextWeek, thisWeek } = useWeek()
@@ -41,8 +24,14 @@ export default function AgendaPage() {
   const [defaultWeekday, setDefaultWeekday] = useState(0)
   const [toast, setToast] = useState(null)
   const [bringing, setBringing] = useState(false)
+  const [view, setView] = useState(() => localStorage.getItem('mlp.agendaView') || 'lista')
 
   const isCurrentWeek = weekStart === mondayOf()
+
+  const setViewPersist = (v) => {
+    setView(v)
+    localStorage.setItem('mlp.agendaView', v)
+  }
 
   const handleBringRecurring = async () => {
     setBringing(true)
@@ -57,37 +46,45 @@ export default function AgendaPage() {
     }
   }
 
-  const openNew = (weekday) => {
-    setEditing(null)
-    setDefaultWeekday(weekday)
-    setModal(true)
-  }
-  const openEdit = (a) => {
-    setEditing(a)
-    setModal(true)
-  }
-  const close = () => {
-    setModal(false)
-    setEditing(null)
-  }
-  const submit = (payload) =>
-    editing ? ag.updateActivity(editing.id, payload) : ag.addActivity(payload)
-
+  const openNew = (weekday) => { setEditing(null); setDefaultWeekday(weekday); setModal(true) }
+  const openEdit = (a) => { setEditing(a); setModal(true) }
+  const close = () => { setModal(false); setEditing(null) }
+  const submit = (payload) => (editing ? ag.updateActivity(editing.id, payload) : ag.addActivity(payload))
   const cycleStatus = (a) => {
-    const next =
-      a.status === 'pendente' ? 'feito' : a.status === 'feito' ? 'nao_realizado' : 'pendente'
+    const next = a.status === 'pendente' ? 'feito' : a.status === 'feito' ? 'nao_realizado' : 'pendente'
     ag.updateActivity(a.id, { status: next })
   }
 
+  const cardProps = { onEdit: openEdit, onDelete: ag.removeActivity, onCycleStatus: cycleStatus }
+  const cur = todayIdx()
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-8">
+    <div className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:px-8">
       {/* cabeçalho */}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-brand-500">Planejamento semanal</p>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Agenda</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* alternador de visão */}
+          <div className="flex items-center gap-1 rounded-xl border border-slate-300 bg-white p-1 dark:border-ink-700 dark:bg-ink-800">
+            <button
+              onClick={() => setViewPersist('lista')}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${view === 'lista' ? 'bg-brand-500 text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-ink-700'}`}
+              title="Ver como lista"
+            >
+              <Rows3 size={15} /> Lista
+            </button>
+            <button
+              onClick={() => setViewPersist('quadro')}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${view === 'quadro' ? 'bg-brand-500 text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-ink-700'}`}
+              title="Ver como quadro"
+            >
+              <Columns3 size={15} /> Quadro
+            </button>
+          </div>
+
           <div className="flex items-center gap-1 rounded-xl border border-slate-300 bg-white p-1 dark:border-ink-700 dark:bg-ink-800">
             <button onClick={prevWeek} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-ink-700" title="Semana anterior">
               <ChevronLeft size={18} />
@@ -101,10 +98,7 @@ export default function AgendaPage() {
             </button>
           </div>
           {!isCurrentWeek && (
-            <button
-              onClick={thisWeek}
-              className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-300 dark:hover:bg-ink-800"
-            >
+            <button onClick={thisWeek} className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-300 dark:hover:bg-ink-800">
               Hoje
             </button>
           )}
@@ -135,105 +129,107 @@ export default function AgendaPage() {
         </div>
       </section>
 
-      {/* grade semanal */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-7">
-        {WEEKDAYS.map((day, i) => {
-          const dayKey = addDays(weekStart, i)
-          const dayNum = new Date(dayKey + 'T00:00:00').getDate()
-          const activities = ag.byDay[i]
-          return (
-            <div
-              key={day}
-              className="flex flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-card dark:border-ink-800 dark:bg-ink-900"
-            >
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase text-slate-400">{WEEKDAYS_SHORT[i]}</p>
-                  <p className="font-display text-lg font-bold text-slate-800 dark:text-slate-100">{dayNum}</p>
-                </div>
-                <button
-                  onClick={() => openNew(i)}
-                  className="rounded-lg p-1 text-slate-400 hover:bg-brand-50 hover:text-brand-500 dark:hover:bg-ink-800"
-                  title={`Adicionar em ${day}`}
-                >
-                  <Plus size={16} />
-                </button>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-2">
-                {activities.length === 0 && (
+      {/* ── VISÃO LISTA: cada dia ocupa a largura toda ── */}
+      {view === 'lista' && (
+        <section className="space-y-4">
+          {WEEKDAYS.map((day, i) => {
+            const dayKey = addDays(weekStart, i)
+            const dayNum = new Date(dayKey + 'T00:00:00').getDate()
+            const activities = ag.byDay[i]
+            const isToday = isCurrentWeek && i === cur
+            return (
+              <div
+                key={day}
+                className={`rounded-2xl border bg-white p-5 shadow-card dark:bg-ink-900 ${
+                  isToday ? 'border-brand-300 dark:border-brand-800' : 'border-slate-200 dark:border-ink-800'
+                }`}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-baseline gap-2">
+                    <h3 className="font-display text-lg font-bold text-slate-800 dark:text-slate-100">{day}</h3>
+                    <span className="text-sm text-slate-400">dia {dayNum}</span>
+                    {isToday && <span className="rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold uppercase text-white">hoje</span>}
+                  </div>
                   <button
                     onClick={() => openNew(i)}
-                    className="rounded-lg border border-dashed border-slate-200 py-3 text-center text-xs text-slate-300 hover:border-brand-300 hover:text-brand-400 dark:border-ink-700"
+                    className="flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-100 dark:bg-brand-900/30 dark:text-brand-300"
                   >
-                    + atividade
+                    <Plus size={15} /> Atividade
                   </button>
-                )}
-                {activities.map((a) => (
-                  <div
-                    key={a.id}
-                    className={`group rounded-lg border-l-4 bg-slate-50 p-2 dark:bg-ink-800/60 ${
-                      catColor[a.category] ?? 'border-l-slate-300'
-                    } ${statusRing[a.status] ?? ''}`}
+                </div>
+                {activities.length === 0 ? (
+                  <button
+                    onClick={() => openNew(i)}
+                    className="w-full rounded-xl border border-dashed border-slate-200 py-4 text-center text-sm text-slate-300 hover:border-brand-300 hover:text-brand-400 dark:border-ink-700"
                   >
-                    <div className="flex items-start justify-between gap-1">
-                      <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                        {a.title}
-                        {a.is_recurring && (
-                          <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-brand-600 dark:bg-brand-900/40">
-                            fixo
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
-                        <button onClick={() => openEdit(a)} className="rounded p-0.5 text-slate-400 hover:text-brand-500" title="Editar">
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Excluir "${a.title}"?`)) ag.removeActivity(a.id)
-                          }}
-                          className="rounded p-0.5 text-slate-400 hover:text-coral"
-                          title="Excluir"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
+                    Nada planejado — adicionar atividade
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {activities.map((a) => (
+                      <ActivityCard key={a.id} activity={a} {...cardProps} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </section>
+      )}
+
+      {/* ── VISÃO QUADRO: colunas largas e altas com scroll (estilo Trello) ── */}
+      {view === 'quadro' && (
+        <section className="-mx-5 overflow-x-auto px-5 pb-2 lg:-mx-8 lg:px-8">
+          <div className="flex gap-4" style={{ minWidth: 'min-content' }}>
+            {WEEKDAYS.map((day, i) => {
+              const dayKey = addDays(weekStart, i)
+              const dayNum = new Date(dayKey + 'T00:00:00').getDate()
+              const activities = ag.byDay[i]
+              const isToday = isCurrentWeek && i === cur
+              return (
+                <div
+                  key={day}
+                  className={`flex w-72 shrink-0 flex-col rounded-2xl border bg-slate-50/60 dark:bg-ink-950/40 ${
+                    isToday ? 'border-brand-300 dark:border-brand-800' : 'border-slate-200 dark:border-ink-800'
+                  }`}
+                  style={{ height: 'calc(100vh - 320px)', minHeight: '420px' }}
+                >
+                  {/* cabeçalho fixo da coluna */}
+                  <div className="flex items-center justify-between px-3 pt-3 pb-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {WEEKDAYS_SHORT[i]} {isToday && <span className="text-brand-500">• hoje</span>}
+                      </p>
+                      <p className="font-display text-xl font-bold text-slate-800 dark:text-slate-100">{dayNum}</p>
                     </div>
-                    {(a.start_time || a.category) && (
-                      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
-                        {a.start_time && (
-                          <span className="inline-flex items-center gap-0.5">
-                            <Clock size={10} />
-                            {a.start_time.slice(0, 5)}
-                            {a.end_time ? `–${a.end_time.slice(0, 5)}` : ''}
-                          </span>
-                        )}
-                        <span className="rounded-full bg-white px-1.5 py-0.5 dark:bg-ink-900">{a.category}</span>
-                      </div>
-                    )}
                     <button
-                      onClick={() => cycleStatus(a)}
-                      className={`mt-2 flex w-full items-center justify-center gap-1 rounded-md py-1 text-[11px] font-semibold transition ${
-                        a.status === 'feito'
-                          ? 'bg-money/15 text-money'
-                          : a.status === 'nao_realizado'
-                          ? 'bg-coral/15 text-coral'
-                          : 'bg-slate-200 text-slate-500 hover:bg-slate-300 dark:bg-ink-700 dark:text-slate-300'
-                      }`}
-                      title="Clique para alternar: pendente → feito → não realizado"
+                      onClick={() => openNew(i)}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-brand-50 hover:text-brand-500 dark:hover:bg-ink-800"
+                      title={`Adicionar em ${day}`}
                     >
-                      {a.status === 'feito' && (<><Check size={12} /> Feito</>)}
-                      {a.status === 'nao_realizado' && (<><X size={12} /> Não realizado</>)}
-                      {a.status === 'pendente' && 'Pendente'}
+                      <Plus size={18} />
                     </button>
                   </div>
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </section>
+                  {/* área de cards com scroll próprio */}
+                  <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
+                    {activities.length === 0 && (
+                      <button
+                        onClick={() => openNew(i)}
+                        className="rounded-xl border border-dashed border-slate-200 py-4 text-center text-sm text-slate-300 hover:border-brand-300 hover:text-brand-400 dark:border-ink-700"
+                      >
+                        + atividade
+                      </button>
+                    )}
+                    {activities.map((a) => (
+                      <ActivityCard key={a.id} activity={a} {...cardProps} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <AddActivityModal
         open={modal}

@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const shareTotal = totals.totalExpenses + totals.totalSavings
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-8">
+    <div className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:px-8">
       {/* cabeçalho */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -45,7 +45,7 @@ export default function NutricaoPage() {
   const [tab, setTab] = useState('diario')
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-8">
+    <div className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:px-8">
       <header>
         <p className="text-xs font-medium uppercase tracking-wide text-brand-500">Saúde e alimentação</p>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Nutrição</h1>
