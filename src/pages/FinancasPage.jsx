@@ -11,7 +11,7 @@ import AddExpenseModal from '../components/AddExpenseModal'
 import AddSimpleModal from '../components/AddSimpleModal'
 
 export default function FinancasPage() {
-  const { refMonth, setRefMonth, months, addNextMonth } = useMonth()
+  const { refMonth, setRefMonth, months, addNextMonth, reloadMonths } = useMonth()
   const { user } = useAuth()
   const fin = useFinanceData(refMonth)
   const [modal, setModal] = useState(null) // 'income' | 'saving' | 'expense' | null
@@ -31,6 +31,7 @@ export default function FinancasPage() {
     try {
       const { incomes, expenses } = await fin.bringRecurring()
       const total = incomes + expenses
+      if (total > 0) reloadMonths()
       showToast(
         total === 0
           ? 'Nenhum item fixo novo para trazer.'
@@ -50,12 +51,22 @@ export default function FinancasPage() {
   const closeModal = () => { setModal(null); setEditing(null) }
 
   // submit unificado: cria (sem editing) ou atualiza (com editing)
-  const submitIncome = (payload) =>
-    editing ? fin.updateRow('incomes', editing.id, payload) : fin.addIncome(payload)
-  const submitSaving = (payload) =>
-    editing ? fin.updateRow('savings', editing.id, payload) : fin.addSaving(payload)
-  const submitExpense = (payload) =>
-    editing ? fin.updateRow('expenses', editing.id, payload) : fin.addExpense(payload)
+  // após criar, recarrega a lista de meses do banco (novo mês passa a existir de verdade)
+  const submitIncome = async (payload) => {
+    if (editing) return fin.updateRow('incomes', editing.id, payload)
+    await fin.addIncome(payload)
+    reloadMonths()
+  }
+  const submitSaving = async (payload) => {
+    if (editing) return fin.updateRow('savings', editing.id, payload)
+    await fin.addSaving(payload)
+    reloadMonths()
+  }
+  const submitExpense = async (payload) => {
+    if (editing) return fin.updateRow('expenses', editing.id, payload)
+    await fin.addExpense(payload)
+    reloadMonths()
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-8">
