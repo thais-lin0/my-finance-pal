@@ -3,6 +3,16 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { defaultDueDate, prevMonthKey } from '../lib/format'
 
+// Fração desta despesa que cabe ao usuário atual.
+// Individual: 100%. Compartilhada: dono paga owner_share%, participante o resto.
+export function expenseShare(expense, userId) {
+  if (!expense.shared_with) return Number(expense.amount) || 0
+  const owner = Number(expense.owner_share ?? 50) / 100
+  const isOwner = expense.user_id === userId
+  const frac = isOwner ? owner : 1 - owner
+  return (Number(expense.amount) || 0) * frac
+}
+
 // Carrega e gerencia receitas, despesas e poupança de um mês de referência.
 export function useFinanceData(refMonth) {
   const { user } = useAuth()
@@ -235,25 +245,25 @@ export function useFinanceData(refMonth) {
   // ── Derivados ──────────────────────────────────────────
   const totals = useMemo(() => {
     const totalIncome = incomes.reduce((s, i) => s + Number(i.amount), 0)
-    const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0)
+    const totalExpenses = expenses.reduce((s, e) => s + expenseShare(e, user?.id), 0)
     const totalSavings = savings.reduce((s, v) => s + Number(v.amount), 0)
-    const paid = expenses.filter((e) => e.is_paid).reduce((s, e) => s + Number(e.amount), 0)
+    const paid = expenses.filter((e) => e.is_paid).reduce((s, e) => s + expenseShare(e, user?.id), 0)
     const remaining = totalExpenses - paid
     const cashBalance = totalIncome - totalExpenses
     const paidPct = totalExpenses > 0 ? Math.round((paid / totalExpenses) * 100) : 0
     return { totalIncome, totalExpenses, totalSavings, paid, remaining, cashBalance, paidPct }
-  }, [incomes, expenses, savings])
+  }, [incomes, expenses, savings, user])
 
   // Gastos agrupados por categoria (para o gráfico de pizza)
   const byCategory = useMemo(() => {
     const map = new Map()
     for (const e of expenses) {
-      map.set(e.category, (map.get(e.category) ?? 0) + Number(e.amount))
+      map.set(e.category, (map.get(e.category) ?? 0) + expenseShare(e, user?.id))
     }
     return [...map.entries()]
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
-  }, [expenses])
+  }, [expenses, user])
 
   return {
     incomes,

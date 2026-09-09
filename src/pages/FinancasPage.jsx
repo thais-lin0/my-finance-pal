@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { useMonth } from '../context/MonthContext'
+import { useAuth } from '../context/AuthContext'
 import { useFinanceData } from '../hooks/useFinanceData'
 import { formatBRL, monthLabel } from '../lib/format'
 import MonthNavigator from '../components/MonthNavigator'
@@ -11,6 +12,7 @@ import AddSimpleModal from '../components/AddSimpleModal'
 
 export default function FinancasPage() {
   const { refMonth, setRefMonth, months, addNextMonth } = useMonth()
+  const { user } = useAuth()
   const fin = useFinanceData(refMonth)
   const [modal, setModal] = useState(null) // 'income' | 'saving' | 'expense' | null
   const [editing, setEditing] = useState(null) // registro em edição
@@ -172,6 +174,7 @@ export default function FinancasPage() {
         </div>
         <ExpensesTable
           expenses={fin.expenses}
+          currentUserId={user?.id}
           onTogglePaid={fin.toggleExpensePaid}
           onDelete={fin.removeRow}
           onEdit={editExpense}
@@ -208,6 +211,8 @@ export default function FinancasPage() {
         items={suggestions.expenseItems}
         initial={modal === 'expense' ? editing : null}
         refMonth={refMonth}
+        currentUserId={user?.id}
+        currentUserEmail={user?.email}
         onClose={closeModal}
         onSubmit={submitExpense}
       />

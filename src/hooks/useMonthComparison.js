@@ -19,7 +19,7 @@ export function useMonthComparison(refMonth) {
     const grab = async (month) => {
       const [inc, exp] = await Promise.all([
         supabase.from('incomes').select('amount').eq('ref_month', month),
-        supabase.from('expenses').select('amount, category').eq('ref_month', month),
+        supabase.from('expenses').select('amount, category, user_id, shared_with, owner_share').eq('ref_month', month),
       ])
       return { incomes: inc.data ?? [], expenses: exp.data ?? [] }
     }
@@ -36,9 +36,16 @@ export function useMonthComparison(refMonth) {
   const sum = (rows) => rows.reduce((s, r) => s + Number(r.amount), 0)
   const groupCat = (rows) => {
     const m = new Map()
-    for (const r of rows) m.set(r.category, (m.get(r.category) ?? 0) + Number(r.amount))
+    for (const r of rows) m.set(r.category, (m.get(r.category) ?? 0) + share(r))
     return m
   }
+  const share = (e) => {
+    if (!e.shared_with) return Number(e.amount) || 0
+    const owner = Number(e.owner_share ?? 50) / 100
+    const frac = e.user_id === user?.id ? owner : 1 - owner
+    return (Number(e.amount) || 0) * frac
+  }
+  const sumExp = (rows) => rows.reduce((s, r) => s + share(r), 0)
 
   const data = useMemo(() => {
     const curExp = groupCat(current.expenses)
@@ -57,8 +64,8 @@ export function useMonthComparison(refMonth) {
     const totals = {
       incomeCur: sum(current.incomes),
       incomePrev: sum(previous.incomes),
-      expenseCur: sum(current.expenses),
-      expensePrev: sum(previous.expenses),
+      expenseCur: sumExp(current.expenses),
+      expensePrev: sumExp(previous.expenses),
     }
     totals.balanceCur = totals.incomeCur - totals.expenseCur
     totals.balancePrev = totals.incomePrev - totals.expensePrev

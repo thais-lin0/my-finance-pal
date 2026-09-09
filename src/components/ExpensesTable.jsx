@@ -11,6 +11,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, formatBRL, formatDateBR, dueStatus } from '../lib/format'
+import { expenseShare } from '../hooks/useFinanceData'
 import EditableCell from './EditableCell'
 
 const dueClasses = {
@@ -22,6 +23,7 @@ const dueClasses = {
 
 export default function ExpensesTable({
   expenses,
+  currentUserId,
   onTogglePaid,
   onDelete,
   onEdit,
@@ -70,10 +72,10 @@ export default function ExpensesTable({
   }, [expenses, catFilter, statusFilter, dueFilter, query, sort])
 
   const summary = useMemo(() => {
-    const total = rows.reduce((s, e) => s + Number(e.amount), 0)
+    const total = rows.reduce((s, e) => s + expenseShare(e, currentUserId), 0)
     const pending = rows.filter((e) => !e.is_paid).length
     return { count: rows.length, total, pending }
-  }, [rows])
+  }, [rows, currentUserId])
 
   // paginação
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
@@ -258,6 +260,14 @@ export default function ExpensesTable({
                           fixo
                         </span>
                       )}
+                      {e.shared_with && (
+                        <span
+                          title={e.user_id === currentUserId ? 'Você dividiu esta despesa' : 'Dividida com você'}
+                          className="rounded-full bg-money/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-money"
+                        >
+                          dividida {e.owner_share ?? 50}/{100 - (e.owner_share ?? 50)}
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="py-2.5 pr-3">
@@ -293,7 +303,16 @@ export default function ExpensesTable({
                       align="right"
                       value={e.amount}
                       onSave={(v) => onInlineSave(e.id, { amount: v })}
-                      display={formatBRL(e.amount)}
+                      display={
+                        e.shared_with ? (
+                          <span title={`Total ${formatBRL(e.amount)} · sua parte`}>
+                            {formatBRL(expenseShare(e, currentUserId))}
+                            <span className="ml-1 text-[10px] font-normal text-slate-400">de {formatBRL(e.amount)}</span>
+                          </span>
+                        ) : (
+                          formatBRL(e.amount)
+                        )
+                      }
                     />
                   </td>
                   <td className="py-2.5 pr-3 text-center">

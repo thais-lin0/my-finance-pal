@@ -32,6 +32,8 @@ create table if not exists public.expenses (
   is_paid      boolean not null default false,
   notes        text,
   is_recurring boolean not null default false,
+  shared_with  uuid references auth.users (id) on delete set null, -- participante da despesa dividida
+  owner_share  integer not null default 50,   -- % que cabe ao criador (user_id)
   ref_month    date not null,
   created_at   timestamptz not null default now()
 );
@@ -120,7 +122,7 @@ create policy "incomes_delete_own" on public.incomes
 -- EXPENSES
 drop policy if exists "expenses_select_own" on public.expenses;
 create policy "expenses_select_own" on public.expenses
-  for select using (auth.uid() = user_id);
+  for select using (auth.uid() = user_id or auth.uid() = shared_with);
 
 drop policy if exists "expenses_insert_own" on public.expenses;
 create policy "expenses_insert_own" on public.expenses
@@ -128,7 +130,8 @@ create policy "expenses_insert_own" on public.expenses
 
 drop policy if exists "expenses_update_own" on public.expenses;
 create policy "expenses_update_own" on public.expenses
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for update using (auth.uid() = user_id or auth.uid() = shared_with)
+  with check (auth.uid() = user_id or auth.uid() = shared_with);
 
 drop policy if exists "expenses_delete_own" on public.expenses;
 create policy "expenses_delete_own" on public.expenses
@@ -184,3 +187,18 @@ create policy "activities_update_own" on public.activities
 drop policy if exists "activities_delete_own" on public.activities;
 create policy "activities_delete_own" on public.activities
   for delete using (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────
+--  Helper: achar user_id por email (para o convite de despesa compartilhada)
+-- ─────────────────────────────────────────────
+create or replace function public.find_user_id_by_email(p_email text)
+returns uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select id from auth.users where lower(email) = lower(p_email) limit 1;
+$$;
+
+revoke all on function public.find_user_id_by_email(text) from public;
+grant execute on function public.find_user_id_by_email(text) to authenticated;
