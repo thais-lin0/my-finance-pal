@@ -15,6 +15,7 @@ import {
   Cookie,
   Moon,
   Soup,
+  Settings,
 } from 'lucide-react'
 import { useWeek } from '../context/WeekContext'
 import { useAgenda } from '../hooks/useAgenda'
@@ -24,6 +25,7 @@ import {
   useShopping,
   useMeasurements,
   useBodyGoals,
+  useDietaryProfile,
   computeWeightProgress,
   MEALS,
   SHOPPING_CATEGORIES,
@@ -38,6 +40,7 @@ const TABS = [
   { id: 'diario', label: 'Diário', icon: UtensilsCrossed },
   { id: 'cardapio', label: 'Cardápio & Compras', icon: CalendarRange },
   { id: 'medidas', label: 'Medidas', icon: Ruler },
+  { id: 'preferencias', label: 'Preferências', icon: Settings },
 ]
 
 const inputCls =
@@ -47,6 +50,18 @@ const card = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-card dark:
 
 export default function NutricaoPage() {
   const [tab, setTab] = useState('diario')
+  const dietary = useDietaryProfile()
+  const [checkedFirstAccess, setCheckedFirstAccess] = useState(false)
+
+  // Primeiro acesso: se a pessoa nunca preencheu o perfil alimentar,
+  // abre direto em Preferências em vez de Diário. Só uma vez — depois
+  // que carrega, não fica puxando de volta se ela navegar pra outra aba.
+  useEffect(() => {
+    if (!dietary.loading && !checkedFirstAccess) {
+      if (!dietary.profile) setTab('preferencias')
+      setCheckedFirstAccess(true)
+    }
+  }, [dietary.loading, dietary.profile, checkedFirstAccess])
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:px-8">
@@ -67,6 +82,9 @@ export default function NutricaoPage() {
             }`}
           >
             <Icon size={16} /> {label}
+            {id === 'preferencias' && checkedFirstAccess && !dietary.profile && (
+              <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-coral" />
+            )}
           </button>
         ))}
       </div>
@@ -74,6 +92,7 @@ export default function NutricaoPage() {
       {tab === 'diario' && <DiarioTab />}
       {tab === 'cardapio' && <CardapioTab />}
       {tab === 'medidas' && <MedidasTab />}
+      {tab === 'preferencias' && <PreferenciasTab />}
     </div>
   )
 }
@@ -177,6 +196,7 @@ function DiarioTab() {
   const day = useNutritionDay(date)
   const bodyGoals = useBodyGoals()
   const measurements = useMeasurements()
+  const dietary = useDietaryProfile()
   const { weekStart } = useWeek()
   const agenda = useAgenda(weekStart)
   const [meal, setMeal] = useState('Almoço')
@@ -223,6 +243,7 @@ function DiarioTab() {
         activities,
         target_weight: bodyGoals.goals?.target_weight ?? null,
         target_date: bodyGoals.goals?.target_date ?? null,
+        profile: dietary.profile,
       })
       if (res?.calories) {
         await day.saveGoals({
@@ -249,7 +270,7 @@ function DiarioTab() {
     setAiBusy(true)
     setAiNote(null)
     try {
-      const res = await callNutritionAI('parse_food', { text: aiText })
+      const res = await callNutritionAI('parse_food', { text: aiText, profile: dietary.profile })
       const items = Array.isArray(res?.items) ? res.items : []
       if (items.length) {
         for (const it of items) {
@@ -429,6 +450,7 @@ function CardapioTab() {
   const plan = useMealPlan(weekStart)
   const day = useNutritionDay(todayKey())
   const shop = useShopping()
+  const dietary = useDietaryProfile()
   const [shopForm, setShopForm] = useState({ name: '', quantity: '', category: 'Hortifruti' })
   const [planAiBusy, setPlanAiBusy] = useState(false)
   const [planNote, setPlanNote] = useState(null)
@@ -441,7 +463,7 @@ function CardapioTab() {
     setPlanAiBusy(true)
     setPlanNote(null)
     try {
-      const res = await callNutritionAI('meal_plan', { goals: day.goals })
+      const res = await callNutritionAI('meal_plan', { goals: day.goals, profile: dietary.profile })
       if (res?.plan?.length) {
         await plan.clearAll()
         for (const p of res.plan) await plan.addMeal(p)
@@ -484,7 +506,7 @@ function CardapioTab() {
     setShopAiBusy(true)
     setShopNote(null)
     try {
-      const res = await callNutritionAI('shopping_list', { plan: plan.items })
+      const res = await callNutritionAI('shopping_list', { plan: plan.items, profile: dietary.profile })
       if (res?.items?.length) {
         await shop.clearAll()
         for (const it of res.items) await shop.addItem(it)
@@ -820,6 +842,190 @@ function MedidasTab() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────── PREFERÊNCIAS ───────────────────────────
+// Anamnese alimentar: restrições, gostos e preferências que personalizam
+// o prompt dos recursos de IA (cardápio, análise de refeição, lista de
+// compras, coach e metas). É a última aba, e é pra onde a pessoa é
+// encaminhada automaticamente no primeiro acesso à Nutrição.
+const DIET_STYLES = [
+  ['sem_restricao', 'Sem restrição'],
+  ['vegetariano', 'Vegetariano'],
+  ['vegano', 'Vegano'],
+  ['low_carb', 'Low carb'],
+  ['cetogenica', 'Cetogênica'],
+  ['outro', 'Outro'],
+]
+
+const VARIETY_LEVELS = [
+  ['bem_simples', 'Bem simples e repetitivo — quero seguir fácil'],
+  ['equilibrado', 'Equilibrado — repete a base, varia os temperos/proteínas'],
+  ['variado', 'Gosto de variedade — pode sugerir pratos diferentes toda semana'],
+]
+
+function PreferenciasTab() {
+  const { profile, loading, saveProfile } = useDietaryProfile()
+  const [form, setForm] = useState(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!loading) {
+      setForm({
+        diet_style: profile?.diet_style ?? 'sem_restricao',
+        restrictions: profile?.restrictions ?? '',
+        dislikes: profile?.dislikes ?? '',
+        preferred_carbs: profile?.preferred_carbs ?? '',
+        preferred_proteins: profile?.preferred_proteins ?? '',
+        preferred_breakfast: profile?.preferred_breakfast ?? '',
+        variety_level: profile?.variety_level ?? 'equilibrado',
+        notes: profile?.notes ?? '',
+      })
+    }
+  }, [loading, profile])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    await saveProfile(form)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  if (!form) return null
+
+  return (
+    <div className="space-y-4">
+      {!profile && (
+        <div className={`${card} border-2 border-brand-200 bg-brand-50 dark:border-brand-800 dark:bg-brand-900/20`}>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-brand-700 dark:text-brand-300">
+            <Sparkles size={15} /> Primeiro acesso à Nutrição
+          </p>
+          <p className="mt-1 text-sm text-brand-700/80 dark:text-brand-300/80">
+            Preencha suas preferências abaixo — é isso que a IA usa pra montar cardápio, analisar refeições e gerar sua
+            lista de compras do seu jeito, não de um jeito genérico.
+          </p>
+        </div>
+      )}
+
+      <form onSubmit={submit} className={`${card} space-y-5`}>
+        <div>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Estilo alimentar</label>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {DIET_STYLES.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, diet_style: value }))}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  form.diet_style === value
+                    ? 'bg-brand-500 text-white shadow-card'
+                    : 'border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-400 dark:hover:bg-ink-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Restrições / alergias / intolerâncias
+            <textarea
+              rows={2}
+              placeholder="Ex: sem lactose, alergia a camarão"
+              value={form.restrictions}
+              onChange={(e) => setForm((f) => ({ ...f, restrictions: e.target.value }))}
+              className={`${inputCls} mt-1 w-full resize-none`}
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Alimentos que não gosta / evita
+            <textarea
+              rows={2}
+              placeholder="Ex: peixe, quiabo, comida muito apimentada"
+              value={form.dislikes}
+              onChange={(e) => setForm((f) => ({ ...f, dislikes: e.target.value }))}
+              className={`${inputCls} mt-1 w-full resize-none`}
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Carboidratos preferidos
+            <input
+              placeholder="Ex: arroz, batata, batata-doce"
+              value={form.preferred_carbs}
+              onChange={(e) => setForm((f) => ({ ...f, preferred_carbs: e.target.value }))}
+              className={`${inputCls} mt-1 w-full`}
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Proteínas preferidas
+            <input
+              placeholder="Ex: carne moída, frango desfiado, bife grelhado"
+              value={form.preferred_proteins}
+              onChange={(e) => setForm((f) => ({ ...f, preferred_proteins: e.target.value }))}
+              className={`${inputCls} mt-1 w-full`}
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 sm:col-span-2">
+            Café da manhã de preferência
+            <input
+              placeholder="Ex: ovo, pão, bacon às vezes, fruta simples"
+              value={form.preferred_breakfast}
+              onChange={(e) => setForm((f) => ({ ...f, preferred_breakfast: e.target.value }))}
+              className={`${inputCls} mt-1 w-full`}
+            />
+          </label>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Nível de variedade do cardápio</label>
+          <div className="mt-2 space-y-2">
+            {VARIETY_LEVELS.map(([value, label]) => (
+              <label
+                key={value}
+                className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+                  form.variety_level === value
+                    ? 'border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/20 dark:text-brand-300'
+                    : 'border-slate-200 text-slate-500 dark:border-ink-700 dark:text-slate-400'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="variety_level"
+                  checked={form.variety_level === value}
+                  onChange={() => setForm((f) => ({ ...f, variety_level: value }))}
+                  className="accent-brand-500"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+          Observações livres (qualquer outra coisa que a IA deva saber)
+          <textarea
+            rows={3}
+            placeholder="Ex: prefiro almoço e jantar iguais no mesmo dia, evito repetir proteína dois dias seguidos..."
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            className={`${inputCls} mt-1 w-full resize-none`}
+          />
+        </label>
+
+        <div className="flex items-center gap-3 border-t border-slate-100 pt-4 dark:border-ink-800">
+          <button type="submit" className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600">
+            Salvar preferências
+          </button>
+          {saved && <span className="text-sm text-money">✓ preferências salvas</span>}
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
+            <Sparkles size={13} /> Usado por: Cardápio, Análise de refeição, Lista de compras e Metas por IA.
+          </span>
+        </div>
+      </form>
     </div>
   )
 }

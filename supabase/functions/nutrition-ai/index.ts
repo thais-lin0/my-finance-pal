@@ -7,11 +7,18 @@
 //  Enquanto OPENROUTER_API_KEY não está configurado, responde com um
 //  payload de exemplo (mock) para o front funcionar.
 //
+//  Todas as ações aceitam opcionalmente `profile` (o perfil alimentar da
+//  aba Configurações — dietary_profile: diet_style, restrictions, dislikes,
+//  preferred_carbs, preferred_proteins, preferred_breakfast, variety_level,
+//  notes), usado por buildProfileText() pra personalizar o prompt por usuário.
+//
 //  Ações suportadas (body.action):
-//   - "parse_food"   { text }          -> { items: [{description, calories, protein_g, carbs_g, fat_g}] }
-//   - "meal_plan"    { goals? }         -> { plan: [{weekday, meal, description, calories}] }
-//   - "shopping_list"{ plan? }          -> { items: [{name, quantity, category}] }
-//   - "insights"     { logs?, goals? }  -> { summary, tips: [] }
+//   - "parse_food"   { text, profile? }                              -> { items: [{description, calories, protein_g, carbs_g, fat_g}] }
+//   - "meal_plan"    { goals?, profile? }                             -> { plan: [{weekday, meal, description, calories}] }
+//   - "shopping_list"{ plan?, profile? }                              -> { items: [{name, quantity, category}] }
+//   - "insights"     { logs?, goals?, profile? }                      -> { summary, tips: [] }
+//   - "macro_goals"  { age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
+//                                                                     -> { calories, protein_g, carbs_g, fat_g, goal_type }
 //
 //  Segredo (Supabase → Project Settings → Edge Functions → Secrets):
 //   OPENROUTER_API_KEY
@@ -31,6 +38,35 @@ const corsHeaders = {
 
 const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', 'Grãos', 'Bebidas', 'Padaria', 'Congelados', 'Limpeza', 'Outros']
 const MEALS = ['Café', 'Almoço', 'Lanche', 'Jantar', 'Ceia']
+
+const DIET_STYLE_LABELS = {
+  vegetariano: 'vegetariano (sem carne nem peixe)',
+  vegano: 'vegano (sem nenhum produto animal)',
+  low_carb: 'low carb',
+  cetogenica: 'cetogênica (muito baixo carboidrato)',
+}
+const VARIETY_LABELS = {
+  bem_simples: 'prefere um cardápio BEM SIMPLES E REPETITIVO, fácil de seguir e comprar — não invente pratos elaborados fora do que a pessoa indicou',
+  equilibrado: 'prefere repetir a base do cardápio, variando temperos/proteínas ao longo da semana',
+  variado: 'gosta de variedade — pode sugerir pratos diferentes a cada dia',
+}
+
+// Converte o perfil alimentar (anamnese em Configurações) num parágrafo de
+// preferências que entra no conteúdo enviado à IA. Sem perfil preenchido,
+// retorna vazio e a IA usa um padrão brasileiro genérico e equilibrado.
+function buildProfileText(profile) {
+  if (!profile) return ''
+  const lines = []
+  if (profile.diet_style && DIET_STYLE_LABELS[profile.diet_style]) lines.push(`Estilo alimentar: ${DIET_STYLE_LABELS[profile.diet_style]}.`)
+  if (profile.restrictions) lines.push(`Restrições/alergias (respeite sempre): ${profile.restrictions}.`)
+  if (profile.dislikes) lines.push(`Não gosta / evitar: ${profile.dislikes}.`)
+  if (profile.preferred_carbs) lines.push(`Carboidratos preferidos: ${profile.preferred_carbs}.`)
+  if (profile.preferred_proteins) lines.push(`Proteínas preferidas: ${profile.preferred_proteins}.`)
+  if (profile.preferred_breakfast) lines.push(`Café da manhã preferido: ${profile.preferred_breakfast}.`)
+  if (profile.variety_level && VARIETY_LABELS[profile.variety_level]) lines.push(`Variedade: a pessoa ${VARIETY_LABELS[profile.variety_level]}.`)
+  if (profile.notes) lines.push(`Observações da pessoa: ${profile.notes}.`)
+  return lines.length ? `\n\nPreferências do usuário (siga estritamente quando fizer sentido):\n${lines.join('\n')}` : ''
+}
 
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENROUTER_ENABLED = Boolean(OPENROUTER_API_KEY)
@@ -89,7 +125,7 @@ async function invokeOpenRouter(action, payload) {
         'Você é um nutricionista. Estime calorias e macronutrientes da refeição descrita pelo usuário, em português do Brasil. ' +
           'Responda ESTRITAMENTE com um JSON válido, sem markdown e sem texto fora do JSON, no formato: ' +
           '{"items":[{"description":"...","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}. Valores numéricos, não strings.',
-        text,
+        text + buildProfileText(payload?.profile),
       )
       return { items: Array.isArray(json.items) ? json.items : [] }
     }
@@ -98,25 +134,22 @@ async function invokeOpenRouter(action, payload) {
       const goalsText = goals
         ? `Meta diária aproximada: ${goals.calories ?? '?'} kcal, ${goals.protein_g ?? '?'}g proteína, ${goals.carbs_g ?? '?'}g carboidrato, ${goals.fat_g ?? '?'}g gordura. Objetivo: ${goals.goal_type ?? 'manutenção'}.`
         : 'Sem metas específicas informadas.'
-      // Rotina fixa da Thais — ajuste aqui se a rotina de comida mudar.
-      // O objetivo é um cardápio repetitivo de propósito (fácil de seguir e
-      // comprar), não variedade de restaurante.
+      // O padrão (sem perfil preenchido em Configurações) é um cardápio
+      // brasileiro equilibrado; as preferências da anamnese (buildProfileText)
+      // é que tornam isso específico pra cada usuário — inclusive repetitivo
+      // de propósito, se a pessoa marcou "bem simples" no nível de variedade.
       const json = await chatJSON(
-        'Você monta cardápios semanais SIMPLES E REPETITIVOS DE PROPÓSITO, seguindo ESTRITAMENTE a rotina abaixo — ' +
-          'não invente pratos fora dela, não sugira receitas elaboradas ou ingredientes que não estejam na lista:\n\n' +
-          'ALMOÇO e JANTAR (todos os dias): um carboidrato + uma leguminosa + legumes diversos + uma proteína, sendo:\n' +
-          '- Carboidrato: arroz, ou batata, ou batata-doce (varie entre os 3 ao longo da semana).\n' +
-          '- Leguminosa: feijão ou lentilha.\n' +
-          '- Legumes diversos: legumes no vapor ou salada simples (sem detalhar receita, só "legumes diversos").\n' +
-          '- Proteína: alterne entre carne moída com molho, carne moída sem molho, frango desfiado temperado com molho, ' +
-          'bife grelhado, frango grelhado — e no máximo 1 vez na semana um estrogonofe.\n\n' +
-          'CAFÉ DA MANHÃ (todos os dias): ovo + pão, variando com bacon de vez em quando, e uma fruta simples (banana, mamão, maçã ou similar).\n\n' +
+        'Você monta cardápios semanais brasileiros, práticos e realistas. ' +
+          'ALMOÇO e JANTAR devem ter um carboidrato + uma leguminosa (feijão/lentilha) + legumes diversos + uma proteína. ' +
+          'CAFÉ DA MANHÃ deve ser simples (ex: ovo, pão, frutas, iogurte). ' +
+          'Se houver preferências do usuário informadas abaixo, siga-as estritamente (o que ela gosta, não gosta, restrições e nível de variedade desejado) — ' +
+          'não invente pratos fora do que a pessoa indicou gostar/comer. Sem preferências informadas, use bom senso de uma dieta equilibrada. ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: ' +
           '{"plan":[{"weekday":0,"meal":"Café","description":"...","calories":0}]}. ' +
           '"weekday" é 0=Segunda ... 6=Domingo. "meal" deve ser exatamente um destes: ' +
           `${MEALS.join(', ')}. Gere Café, Almoço e Jantar para os 7 dias (21 itens no total), com "description" curta ` +
           '(ex: "Arroz, feijão, legumes diversos e frango grelhado").',
-        goalsText,
+        goalsText + buildProfileText(payload?.profile),
       )
       return { plan: Array.isArray(json.plan) ? json.plan : [] }
     }
@@ -128,10 +161,11 @@ async function invokeOpenRouter(action, payload) {
           : 'Nenhum cardápio foi informado; gere uma lista de compras genérica para uma semana de alimentação saudável.'
       const json = await chatJSON(
         'Você monta listas de compras de supermercado a partir de um cardápio, em português do Brasil. ' +
+          'Se houver restrições/alergias ou alimentos que o usuário não gosta informados abaixo, NÃO inclua itens relacionados a eles. ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: ' +
           '{"items":[{"name":"...","quantity":"...","category":"..."}]}. ' +
           `"category" deve ser exatamente um destes: ${SHOPPING_CATEGORIES.join(', ')}.`,
-        planText,
+        planText + buildProfileText(payload?.profile),
       )
       return { items: Array.isArray(json.items) ? json.items : [] }
     }
@@ -146,8 +180,8 @@ async function invokeOpenRouter(action, payload) {
       const json = await chatJSON(
         'Você é um coach de nutrição breve e direto, em português do Brasil. ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: {"summary":"...","tips":["...","..."]}. ' +
-          'O resumo deve ter até 2 frases; gere de 3 a 5 dicas curtas e acionáveis.',
-        `${logsText}\n${goalsText}`,
+          'O resumo deve ter até 2 frases; gere de 3 a 5 dicas curtas e acionáveis, levando em conta as preferências do usuário se houver.',
+        `${logsText}\n${goalsText}` + buildProfileText(payload?.profile),
       )
       return { summary: json.summary ?? '', tips: Array.isArray(json.tips) ? json.tips : [] }
     }
@@ -178,15 +212,16 @@ async function invokeOpenRouter(action, payload) {
         }
       }
 
-      const profileText = `Idade: ${age ?? '?'} anos. Peso atual: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ${activityText} ${goalText}`
+      const bioText = `Idade: ${age ?? '?'} anos. Peso atual: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ${activityText} ${goalText}`
       const json = await chatJSON(
         'Você é um nutricionista esportivo. Com base em idade, peso, altura, nível de atividade física semanal e no OBJETIVO de peso informados, ' +
           'estime o gasto calórico diário (TDEE) e proponha uma meta diária de calorias e macronutrientes alinhada a esse objetivo ' +
-          '(sexo biológico não foi informado; use uma estimativa média razoável). ' +
+          '(sexo biológico não foi informado; use uma estimativa média razoável). Se houver restrições/estilo alimentar informados, ' +
+          'considere-os ao pensar nas fontes de proteína/carboidrato implícitas nos macros. ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: ' +
           '{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"goal_type":"cutting"}. ' +
           '"goal_type" deve ser exatamente "cutting" (emagrecer), "manutencao" ou "bulking" (ganhar peso), conforme o objetivo. Valores numéricos inteiros.',
-        profileText,
+        bioText + buildProfileText(payload?.profile),
       )
       return {
         calories: Number(json.calories) || 0,

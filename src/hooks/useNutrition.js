@@ -266,6 +266,35 @@ export function useBodyGoals() {
   return { goals, loading, reload: load, saveGoals }
 }
 
+// Perfil alimentar (anamnese): restrições, gostos e preferências que
+// personalizam o prompt dos recursos de IA. Uma linha por usuário.
+export function useDietaryProfile() {
+  const { user } = useAuth()
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    if (!user) return
+    setLoading(true)
+    const { data } = await supabase.from('dietary_profile').select('*').eq('user_id', user.id).maybeSingle()
+    setProfile(data ?? null)
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const saveProfile = async (patch) => {
+    const next = { ...(profile ?? {}), ...patch, user_id: user.id, updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('dietary_profile').upsert(next)
+    if (error) throw error
+    setProfile(next)
+  }
+
+  return { profile, loading, reload: load, saveProfile }
+}
+
 // Progresso rumo à meta de peso, dado o histórico de medidas e as metas.
 // Retorna null se faltar dado. current e start em kg, target em kg.
 export function computeWeightProgress(measurements, goals) {
