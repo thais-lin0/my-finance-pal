@@ -15,6 +15,9 @@ export function MonthProvider({ children }) {
     const base = monthsFromStart()
     return base.includes(monthKey()) ? monthKey() : base[base.length - 1]
   })
+  // garante que a seleção automática do último mês só acontece na carga inicial,
+  // sem "puxar" o usuário de volta depois que ele navega manualmente
+  const [hasAutoSelected, setHasAutoSelected] = useState(false)
 
   // Busca os meses com dados no banco (funciona em qualquer dispositivo).
   const loadMonths = useCallback(async () => {
@@ -29,8 +32,14 @@ export function MonthProvider({ children }) {
       ...(inc.data ?? []),
       ...(sav.data ?? []),
     ].map((r) => r.ref_month)
-    setDbMonths([...new Set(all.filter(Boolean))])
-  }, [user])
+    const uniqueDbMonths = [...new Set(all.filter(Boolean))]
+    setDbMonths(uniqueDbMonths)
+    if (!hasAutoSelected) {
+      const combined = [...new Set([...monthsFromStart(), ...uniqueDbMonths])].sort()
+      setRefMonth(combined[combined.length - 1])
+      setHasAutoSelected(true)
+    }
+  }, [user, hasAutoSelected])
 
   useEffect(() => {
     loadMonths()
