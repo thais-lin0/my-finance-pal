@@ -114,6 +114,12 @@ export function useMealPlan(weekStart) {
     if (error) throw error
     await load()
   }
+  // Apaga todo o cardápio da semana atual (usado antes de gerar de novo, pra sobrescrever).
+  const clearAll = async () => {
+    const { error } = await supabase.from('meal_plans').delete().eq('week_start', weekStart)
+    if (error) throw error
+    await load()
+  }
 
   const byDay = useMemo(() => {
     const map = Array.from({ length: 7 }, () => [])
@@ -121,7 +127,7 @@ export function useMealPlan(weekStart) {
     return map
   }, [items])
 
-  return { items, byDay, loading, reload: load, addMeal, updateMeal, removeMeal }
+  return { items, byDay, loading, reload: load, addMeal, updateMeal, removeMeal, clearAll }
 }
 
 // Lista de compras.
@@ -164,8 +170,16 @@ export function useShopping() {
     if (error) throw error
     await load()
   }
+  // Apaga a lista inteira (usado antes de gerar de novo, pra sobrescrever).
+  const clearAll = async () => {
+    const ids = items.map((i) => i.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('shopping_items').delete().in('id', ids)
+    if (error) throw error
+    await load()
+  }
 
-  return { items, loading, reload: load, addItem, toggleBought, removeItem, clearBought }
+  return { items, loading, reload: load, addItem, toggleBought, removeItem, clearBought, clearAll }
 }
 
 // Medidas corporais ao longo do tempo.
