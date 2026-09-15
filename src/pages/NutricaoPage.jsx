@@ -10,6 +10,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Target,
   Coffee,
   Cookie,
@@ -251,6 +252,7 @@ function DiarioTab() {
           protein_g: Number(res.protein_g) || day.goals.protein_g,
           carbs_g: Number(res.carbs_g) || day.goals.carbs_g,
           fat_g: Number(res.fat_g) || day.goals.fat_g,
+          water_ml_goal: Number(res.water_ml) || day.goals.water_ml_goal,
           goal_type: res.goal_type ?? day.goals.goal_type,
         })
       }
@@ -356,11 +358,26 @@ function DiarioTab() {
         <div className={card}>
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</h3>
-            <button onClick={() => setGoalsOpen((o) => !o)} className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-500 hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-400">
+            <button
+              onClick={() => setGoalsOpen((o) => !o)}
+              aria-expanded={goalsOpen}
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+                goalsOpen
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-400'
+              }`}
+            >
               <Target size={13} /> Metas
+              <ChevronDown size={13} className={`transition-transform ${goalsOpen ? 'rotate-180' : ''}`} />
             </button>
           </div>
-          <MacroProgress totals={day.totals} goals={day.goals} />
+          <MacroProgress
+            totals={day.totals}
+            goals={day.goals}
+            water={{ total: day.waterTotal, goal: day.goals.water_ml_goal }}
+            onAddWater={day.addWater}
+            onUndoWater={day.removeLastWater}
+          />
 
           {goalsOpen && (
             <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-ink-800">
@@ -378,6 +395,7 @@ function DiarioTab() {
                 ['protein_g', 'Proteína (g)'],
                 ['carbs_g', 'Carboidrato (g)'],
                 ['fat_g', 'Gordura (g)'],
+                ['water_ml_goal', 'Água (ml)'],
               ].map(([k, label]) => (
                 <label key={k} className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
                   {label}

@@ -5,13 +5,14 @@ import { useAuth } from '../context/AuthContext'
 export const MEALS = ['Café', 'Almoço', 'Lanche', 'Jantar', 'Ceia']
 export const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', 'Grãos', 'Bebidas', 'Padaria', 'Congelados', 'Limpeza', 'Outros']
 
-const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao' }
+const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000 }
 
 // Diário + metas de um dia específico (logDate = YYYY-MM-DD).
 export function useNutritionDay(logDate) {
   const { user } = useAuth()
   const [logs, setLogs] = useState([])
   const [goals, setGoals] = useState(DEFAULT_GOALS)
+  const [water, setWater] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -19,13 +20,15 @@ export function useNutritionDay(logDate) {
     if (!user || !logDate) return
     setLoading(true)
     setError(null)
-    const [logRes, goalRes] = await Promise.all([
+    const [logRes, goalRes, waterRes] = await Promise.all([
       supabase.from('food_logs').select('*').eq('log_date', logDate).order('created_at'),
       supabase.from('nutrition_goals').select('*').eq('user_id', user.id).maybeSingle(),
+      supabase.from('water_logs').select('*').eq('log_date', logDate).order('created_at'),
     ])
     if (logRes.error) setError(logRes.error.message)
     setLogs(logRes.data ?? [])
     if (goalRes.data) setGoals(goalRes.data)
+    setWater(waterRes.data ?? [])
     setLoading(false)
   }, [user, logDate])
 
@@ -56,6 +59,18 @@ export function useNutritionDay(logDate) {
     if (error) throw error
     setGoals(next)
   }
+  const addWater = async (amount_ml) => {
+    const { error } = await supabase.from('water_logs').insert({ user_id: user.id, log_date: logDate, amount_ml })
+    if (error) throw error
+    await load()
+  }
+  const removeLastWater = async () => {
+    const last = water[water.length - 1]
+    if (!last) return
+    const { error } = await supabase.from('water_logs').delete().eq('id', last.id)
+    if (error) throw error
+    await load()
+  }
 
   const totals = useMemo(() => {
     const sum = (k) => logs.reduce((s, l) => s + Number(l[k] || 0), 0)
@@ -67,6 +82,8 @@ export function useNutritionDay(logDate) {
     }
   }, [logs])
 
+  const waterTotal = useMemo(() => water.reduce((s, w) => s + Number(w.amount_ml || 0), 0), [water])
+
   const byMeal = useMemo(() => {
     const map = {}
     for (const m of MEALS) map[m] = []
@@ -74,7 +91,23 @@ export function useNutritionDay(logDate) {
     return map
   }, [logs])
 
-  return { logs, byMeal, goals, totals, loading, error, reload: load, addLog, updateLog, removeLog, saveGoals }
+  return {
+    logs,
+    byMeal,
+    goals,
+    totals,
+    water,
+    waterTotal,
+    loading,
+    error,
+    reload: load,
+    addLog,
+    updateLog,
+    removeLog,
+    saveGoals,
+    addWater,
+    removeLastWater,
+  }
 }
 
 // Cardápio semanal (weekStart = segunda).

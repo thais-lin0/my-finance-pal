@@ -18,7 +18,7 @@
 //   - "shopping_list"{ plan?, profile? }                              -> { items: [{name, quantity, category}] }
 //   - "insights"     { logs?, goals?, profile? }                      -> { summary, tips: [] }
 //   - "macro_goals"  { age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
-//                                                                     -> { calories, protein_g, carbs_g, fat_g, goal_type }
+//                                                                     -> { calories, protein_g, carbs_g, fat_g, water_ml, goal_type }
 //
 //  Segredo (Supabase → Project Settings → Edge Functions → Secrets):
 //   OPENROUTER_API_KEY
@@ -218,8 +218,10 @@ async function invokeOpenRouter(action, payload) {
           'estime o gasto calórico diário (TDEE) e proponha uma meta diária de calorias e macronutrientes alinhada a esse objetivo ' +
           '(sexo biológico não foi informado; use uma estimativa média razoável). Se houver restrições/estilo alimentar informados, ' +
           'considere-os ao pensar nas fontes de proteína/carboidrato implícitas nos macros. ' +
+          'Além disso, estime uma meta diária de consumo de ÁGUA em ml, usando como base ~35ml por kg de peso corporal, ' +
+          'ajustada pra cima conforme o nível de atividade física semanal (mais treino = mais água). ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: ' +
-          '{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"goal_type":"cutting"}. ' +
+          '{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"water_ml":0,"goal_type":"cutting"}. ' +
           '"goal_type" deve ser exatamente "cutting" (emagrecer), "manutencao" ou "bulking" (ganhar peso), conforme o objetivo. Valores numéricos inteiros.',
         bioText + buildProfileText(payload?.profile),
       )
@@ -228,6 +230,7 @@ async function invokeOpenRouter(action, payload) {
         protein_g: Number(json.protein_g) || 0,
         carbs_g: Number(json.carbs_g) || 0,
         fat_g: Number(json.fat_g) || 0,
+        water_ml: Number(json.water_ml) || 0,
         goal_type: ['cutting', 'manutencao', 'bulking'].includes(json.goal_type) ? json.goal_type : undefined,
       }
     }
@@ -252,7 +255,7 @@ function mockResponse(action, payload) {
     case 'shopping_list':
       return { mock: true, items: [], note: 'IA não configurada: adicione os itens manualmente.' }
     case 'macro_goals':
-      return { mock: true, calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, note: 'IA não configurada: defina as metas manualmente.' }
+      return { mock: true, calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, water_ml: 0, note: 'IA não configurada: defina as metas manualmente.' }
     case 'insights':
       return {
         mock: true,
