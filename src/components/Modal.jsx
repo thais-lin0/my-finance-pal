@@ -3,9 +3,9 @@ import { X } from 'lucide-react'
 export default function Modal({ open, title, onClose, children }) {
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
-        <div className="mb-4 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
+      <div className="my-6 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 sm:my-0">
+        <div className="sticky -top-6 -mx-6 mb-4 flex items-center justify-between bg-white px-6 pb-3 pt-6 dark:bg-slate-900">
           <h3 className="text-lg font-bold text-slate-900 dark:text-white">{title}</h3>
           <button
             onClick={onClose}

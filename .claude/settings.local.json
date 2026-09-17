@@ -1,9 +1,0 @@
-{
-  "availableModels": [
-    "default",
-    "sonnet",
-    "claude-fable-5-1[1m]",
-    "opus",
-    "haiku"
-  ]
-}

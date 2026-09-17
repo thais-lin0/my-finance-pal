@@ -203,7 +203,89 @@ export default function ExpensesTable({
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      {/* mobile: cards empilhados (a tabela de 8 colunas não cabe numa tela de celular) */}
+      <div className="space-y-2.5 sm:hidden">
+        {rows.length === 0 && (
+          <p className="py-6 text-center text-sm text-slate-400">Nenhuma despesa encontrada.</p>
+        )}
+        {pagedRows.map((e) => {
+          const st = dueStatus(e.due_date, e.is_paid)
+          return (
+            <div key={e.id} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-ink-800 dark:bg-ink-900">
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={selected.has(e.id)}
+                  onChange={() => toggleSelect(e.id)}
+                  className="mt-1 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{e.description}</span>
+                    {e.is_recurring && (
+                      <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-brand-600 dark:bg-brand-900/40">
+                        fixo
+                      </span>
+                    )}
+                    {e.shared_with && (
+                      <span className="rounded-full bg-money/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-money">
+                        dividida
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-ink-800 dark:text-slate-300">
+                      {e.category}
+                    </span>
+                    <span className={`inline-flex items-center gap-1 ${dueClasses[st]}`}>
+                      {st === 'overdue' && <AlertTriangle size={12} />}
+                      {st === 'soon' && <Clock size={12} />}
+                      {formatDateBR(e.due_date)}
+                    </span>
+                  </div>
+                  {e.notes && <p className="mt-1 text-xs text-slate-400">{e.notes}</p>}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <span className="tnum text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {formatBRL(expenseShare(e, currentUserId))}
+                  </span>
+                  {e.shared_with && (
+                    <span className="text-[10px] text-slate-400">de {formatBRL(e.amount)}</span>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => onTogglePaid(e.id, !e.is_paid)}
+                      title={e.is_paid ? 'Marcar como pendente' : 'Marcar como pago'}
+                      className={`inline-grid h-6 w-6 place-items-center rounded-md border transition ${
+                        e.is_paid
+                          ? 'border-money bg-money text-white'
+                          : 'border-slate-300 text-transparent hover:border-money dark:border-ink-700'
+                      }`}
+                    >
+                      <Check size={13} />
+                    </button>
+                    <button onClick={() => onEdit(e)} className="rounded-md p-1 text-slate-400 hover:bg-brand-50 hover:text-brand-500 dark:hover:bg-ink-800" title="Editar">
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Excluir "${e.description}"?`)) onDelete('expenses', e.id)
+                      }}
+                      className="rounded-md p-1 text-slate-400 hover:bg-coral/10 hover:text-coral"
+                      title="Excluir"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* desktop/tablet: tabela completa com edição inline */}
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400 dark:border-ink-800">

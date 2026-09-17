@@ -90,7 +90,7 @@ function extractJson(text) {
   throw new Error('JSON incompleto na resposta da IA')
 }
 
-async function chatJSON(systemPrompt, userPrompt) {
+async function chatOnce(systemPrompt, userPrompt) {
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -113,8 +113,32 @@ async function chatJSON(systemPrompt, userPrompt) {
     throw new Error(`OpenRouter ${resp.status}: ${body.slice(0, 300)}`)
   }
   const data = await resp.json()
-  const content = data?.choices?.[0]?.message?.content ?? ''
-  return extractJson(content)
+  return data?.choices?.[0]?.message?.content ?? ''
+}
+
+// O roteador "openrouter/free" pode cair num modelo fraco que ignora a
+// instrução de responder só em JSON. Como é estocástico, tentar de novo
+// (com um lembrete mais forte) resolve a maioria dos casos — não dá pra
+// forçar um schema de verdade (tipo Pydantic) num modelo gratuito que
+// muda a cada chamada, mas o retry cobre o caso comum de forma barata.
+async function chatJSON(systemPrompt, userPrompt, retries = 2) {
+  let lastError
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const prompt =
+      attempt === 0
+        ? userPrompt
+        : `${userPrompt}\n\n(Sua resposta anterior não veio em JSON válido ou veio incompleta. Responda de novo, ESTRITAMENTE e SOMENTE com o objeto JSON pedido — nenhum texto, explicação ou markdown antes ou depois.)`
+    try {
+      const content = await chatOnce(systemPrompt, prompt)
+      return extractJson(content)
+    } catch (e) {
+      lastError = e
+      // erro de rede/HTTP (401/402/429/5xx) não se resolve tentando de novo
+      // com o mesmo prompt — só vale retry pra falha de parsing do JSON
+      if (String(e?.message ?? '').startsWith('OpenRouter ')) throw e
+    }
+  }
+  throw lastError
 }
 
 async function invokeOpenRouter(action, payload) {
