@@ -13,6 +13,7 @@ import { useAgenda } from '../hooks/useAgenda'
 import { WEEKDAYS, WEEKDAYS_SHORT, weekLabel, addDays, mondayOf } from '../lib/format'
 import AddActivityModal from '../components/AddActivityModal'
 import ActivityCard from '../components/ActivityCard'
+import Modal from '../components/Modal'
 
 const todayIdx = () => (new Date().getDay() + 6) % 7 // 0=Seg
 
@@ -50,9 +51,26 @@ export default function AgendaPage() {
   const openEdit = (a) => { setEditing(a); setModal(true) }
   const close = () => { setModal(false); setEditing(null) }
   const submit = (payload) => (editing ? ag.updateActivity(editing.id, payload) : ag.addActivity(payload))
+
+  // Modal de calorias gastas — abre ao MARCAR uma atividade como concluída.
+  const [calModal, setCalModal] = useState(null) // { activity, value }
   const cycleStatus = (a) => {
     const next = a.status === 'pendente' ? 'feito' : a.status === 'feito' ? 'nao_realizado' : 'pendente'
-    ag.updateActivity(a.id, { status: next })
+    if (next === 'feito') {
+      // ao concluir, pede as calorias gastas (pré-preenche se já houver)
+      setCalModal({ activity: a, value: a.calories_burned ?? '' })
+      return
+    }
+    // ao sair de "feito", zera as calorias registradas
+    const patch = { status: next }
+    if (a.status === 'feito') patch.calories_burned = null
+    ag.updateActivity(a.id, patch)
+  }
+  const saveCalories = () => {
+    if (!calModal) return
+    const kcal = calModal.value === '' ? null : Number(calModal.value) || 0
+    ag.updateActivity(calModal.activity.id, { status: 'feito', calories_burned: kcal })
+    setCalModal(null)
   }
 
   const cardProps = { onEdit: openEdit, onDelete: ag.removeActivity, onCycleStatus: cycleStatus }
@@ -238,6 +256,54 @@ export default function AgendaPage() {
         onClose={close}
         onSubmit={submit}
       />
+
+      <Modal
+        open={!!calModal}
+        title="Concluir atividade"
+        onClose={() => setCalModal(null)}
+      >
+        {calModal && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Quantas calorias você gastou em <strong>{calModal.activity.title}</strong>?
+              <span className="mt-1 block text-xs text-slate-400">
+                Some ao total de calorias gastas do dia (Diário da Nutrição). Deixe em branco se não souber.
+              </span>
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                inputMode="numeric"
+                autoFocus
+                value={calModal.value}
+                onChange={(e) => setCalModal((s) => ({ ...s, value: e.target.value }))}
+                onKeyDown={(e) => e.key === 'Enter' && saveCalories()}
+                placeholder="ex: 350"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-brand-400 focus:outline-none dark:border-ink-700 dark:bg-ink-800 dark:text-slate-100"
+              />
+              <span className="text-sm text-slate-400">kcal</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  // conclui sem registrar calorias
+                  ag.updateActivity(calModal.activity.id, { status: 'feito', calories_burned: null })
+                  setCalModal(null)
+                }}
+                className="rounded-xl px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-ink-800"
+              >
+                Pular
+              </button>
+              <button
+                onClick={saveCalories}
+                className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {toast && (
         <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg dark:bg-ink-700">

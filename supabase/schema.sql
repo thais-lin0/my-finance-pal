@@ -202,3 +202,37 @@ $$;
 
 revoke all on function public.find_user_id_by_email(text) from public;
 grant execute on function public.find_user_id_by_email(text) to authenticated;
+
+-- ─────────────────────────────────────────────
+--  Saúde diária (entrada manual) — ver migrations 011 e 012
+--  Passos manuais aqui; calorias gastas vêm de activities.calories_burned.
+-- ─────────────────────────────────────────────
+create table if not exists public.health_daily (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  log_date   date not null default current_date,
+  steps      integer,
+  steps_goal integer not null default 8000,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, log_date)
+);
+
+alter table public.health_daily enable row level security;
+
+drop policy if exists "health_daily_select_own" on public.health_daily;
+create policy "health_daily_select_own" on public.health_daily
+  for select using (auth.uid() = user_id);
+drop policy if exists "health_daily_insert_own" on public.health_daily;
+create policy "health_daily_insert_own" on public.health_daily
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "health_daily_update_own" on public.health_daily;
+create policy "health_daily_update_own" on public.health_daily
+  for update using (auth.uid() = user_id);
+drop policy if exists "health_daily_delete_own" on public.health_daily;
+create policy "health_daily_delete_own" on public.health_daily
+  for delete using (auth.uid() = user_id);
+
+-- calorias gastas por atividade concluída na Agenda
+alter table public.activities
+  add column if not exists calories_burned integer;

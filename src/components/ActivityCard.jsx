@@ -89,6 +89,11 @@ export default function ActivityCard({ activity: a, onEdit, onDelete, onCycleSta
               </span>
             )}
             <span className="rounded-full bg-white/70 px-2 py-0.5 dark:bg-black/20">{a.category}</span>
+            {a.calories_burned != null && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 font-medium text-orange-700 dark:bg-orange-900/50 dark:text-orange-300">
+                🔥 {a.calories_burned} kcal
+              </span>
+            )}
           </div>
 
           {a.notes && <p className="mt-1.5 text-xs text-slate-400">{a.notes}</p>}

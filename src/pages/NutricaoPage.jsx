@@ -17,6 +17,8 @@ import {
   Moon,
   Soup,
   Settings,
+  Flame,
+  Footprints,
 } from 'lucide-react'
 import { useWeek } from '../context/WeekContext'
 import { useAgenda } from '../hooks/useAgenda'
@@ -27,6 +29,7 @@ import {
   useMeasurements,
   useBodyGoals,
   useDietaryProfile,
+  useHealthDay,
   computeWeightProgress,
   MEALS,
   SHOPPING_CATEGORIES,
@@ -195,6 +198,7 @@ const MEAL_ICONS = { Café: Coffee, Almoço: UtensilsCrossed, Lanche: Cookie, Ja
 function DiarioTab() {
   const [date, setDate] = useState(todayKey())
   const day = useNutritionDay(date)
+  const health = useHealthDay(date)
   const bodyGoals = useBodyGoals()
   const measurements = useMeasurements()
   const dietary = useDietaryProfile()
@@ -378,6 +382,45 @@ function DiarioTab() {
             onAddWater={day.addWater}
             onUndoWater={day.removeLastWater}
           />
+
+          {/* atividade do dia: calorias gastas (das atividades concluídas na
+              Agenda) + passos (manual). Só informativo — não mexe na meta de
+              ingestão. */}
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 dark:border-ink-800">
+            <div className="rounded-xl bg-orange-50 p-3 dark:bg-orange-900/30">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                <Flame size={14} /> Calorias gastas
+              </div>
+              <div className="mt-1 text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                {health.caloriesBurned != null ? health.caloriesBurned : '—'}
+                <span className="ml-1 text-xs font-normal text-slate-400">kcal</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                das atividades concluídas
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/30">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                <Footprints size={14} /> Passos
+              </div>
+              <input
+                type="number"
+                inputMode="numeric"
+                defaultValue={health.data?.steps ?? ''}
+                key={`steps-${date}-${health.data?.steps ?? ''}`}
+                onBlur={(e) => {
+                  const v = e.target.value
+                  if (String(v) !== String(health.data?.steps ?? '')) health.saveSteps(v)
+                }}
+                placeholder="—"
+                className="mt-1 w-full bg-transparent text-xl font-bold tabular-nums text-slate-800 outline-none placeholder:text-slate-300 dark:text-slate-100"
+              />
+              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                digite o total do dia
+              </div>
+            </div>
+          </div>
 
           {goalsOpen && (
             <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-ink-800">

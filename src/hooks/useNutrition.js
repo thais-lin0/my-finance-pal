@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { mondayOf } from '../lib/format'
 
 export const MEALS = ['Café', 'Almoço', 'Lanche', 'Jantar', 'Ceia']
 export const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', 'Grãos', 'Bebidas', 'Padaria', 'Congelados', 'Limpeza', 'Outros']
@@ -326,6 +327,77 @@ export function useDietaryProfile() {
   }
 
   return { profile, loading, reload: load, saveProfile }
+}
+
+// Dados de saúde de um dia (entrada MANUAL -> health_daily).
+// Passos e meta de passos são preenchidos à mão. As calorias gastas vêm
+// da soma das atividades concluídas na Agenda naquela data. Nada disso
+// altera a meta de ingestão calórica — é só informativo.
+export function useHealthDay(logDate) {
+  const { user } = useAuth()
+  const [data, setData] = useState(null)
+  const [caloriesBurned, setCaloriesBurned] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    if (!user || !logDate) return
+    setLoading(true)
+    // atividades usam week_start (segunda) + weekday (0=Seg..6=Dom), não uma
+    // coluna de data — derivo os dois a partir de logDate para casar o dia.
+    const ws = mondayOf(new Date(logDate + 'T00:00:00'))
+    const wd = (new Date(logDate + 'T00:00:00').getDay() + 6) % 7
+    const [{ data: row }, { data: acts }] = await Promise.all([
+      supabase
+        .from('health_daily')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('log_date', logDate)
+        .maybeSingle(),
+      // soma das calorias gastas nas atividades concluídas nesse dia
+      supabase
+        .from('activities')
+        .select('calories_burned')
+        .eq('user_id', user.id)
+        .eq('week_start', ws)
+        .eq('weekday', wd)
+        .eq('status', 'feito')
+        .not('calories_burned', 'is', null),
+    ])
+    setData(row ?? null)
+    const burned = (acts ?? []).reduce((sum, a) => sum + Number(a.calories_burned || 0), 0)
+    setCaloriesBurned(acts && acts.length ? burned : null)
+    setLoading(false)
+  }, [user, logDate])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Salva passos e/ou meta de passos do dia (upsert).
+  const save = async (patch) => {
+    const row = {
+      user_id: user.id,
+      log_date: logDate,
+      steps_goal: data?.steps_goal ?? 8000,
+      ...(data?.steps != null ? { steps: data.steps } : {}),
+      ...patch,
+      updated_at: new Date().toISOString(),
+    }
+    const { error } = await supabase
+      .from('health_daily')
+      .upsert(row, { onConflict: 'user_id,log_date' })
+    if (error) throw error
+    await load()
+  }
+
+  return {
+    data,
+    caloriesBurned,
+    loading,
+    reload: load,
+    saveSteps: (steps) => save({ steps: steps === '' || steps == null ? null : Number(steps) }),
+    saveStepsGoal: (steps_goal) => save({ steps_goal: Number(steps_goal) || 0 }),
+  }
 }
 
 // Progresso rumo à meta de peso, dado o histórico de medidas e as metas.
