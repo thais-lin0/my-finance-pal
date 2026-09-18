@@ -6,7 +6,9 @@ import { mondayOf } from '../lib/format'
 export const MEALS = ['Café', 'Almoço', 'Lanche', 'Jantar', 'Ceia']
 export const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', 'Grãos', 'Bebidas', 'Padaria', 'Congelados', 'Limpeza', 'Outros']
 
-const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000 }
+// Distribuição padrão da meta diária de calorias entre as refeições (%).
+export const DEFAULT_MEAL_SPLIT = { 'Café': 25, 'Almoço': 35, 'Lanche': 10, 'Jantar': 25, 'Ceia': 5 }
+const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000, meal_split: DEFAULT_MEAL_SPLIT }
 
 // Diário + metas de um dia específico (logDate = YYYY-MM-DD).
 export function useNutritionDay(logDate) {
@@ -92,11 +94,39 @@ export function useNutritionDay(logDate) {
     return map
   }, [logs])
 
+  // Meta de calorias por refeição = meta diária × percentual da distribuição.
+  // Se meal_split vier vazio/ausente (linha antiga antes da migration 013),
+  // cai no default pra não quebrar.
+  const mealSplit = useMemo(() => {
+    const s = goals?.meal_split
+    if (s && typeof s === 'object' && Object.keys(s).length) return s
+    return DEFAULT_MEAL_SPLIT
+  }, [goals])
+
+  const mealGoals = useMemo(() => {
+    const dailyCal = Number(goals?.calories || 0)
+    const out = {}
+    for (const m of MEALS) out[m] = Math.round((dailyCal * Number(mealSplit[m] || 0)) / 100)
+    return out
+  }, [goals, mealSplit])
+
+  // Calorias consumidas por refeição (soma das entradas de cada refeição).
+  const mealTotals = useMemo(() => {
+    const out = {}
+    for (const m of MEALS) {
+      out[m] = (byMeal[m] ?? []).reduce((s, l) => s + Number(l.calories || 0), 0)
+    }
+    return out
+  }, [byMeal])
+
   return {
     logs,
     byMeal,
     goals,
     totals,
+    mealSplit,
+    mealGoals,
+    mealTotals,
     water,
     waterTotal,
     loading,

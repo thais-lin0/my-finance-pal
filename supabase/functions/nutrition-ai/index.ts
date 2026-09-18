@@ -18,7 +18,7 @@
 //   - "shopping_list"{ plan?, profile? }                              -> { items: [{name, quantity, category}] }
 //   - "insights"     { logs?, goals?, profile? }                      -> { summary, tips: [] }
 //   - "macro_goals"  { age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
-//                                                                     -> { calories, protein_g, carbs_g, fat_g, water_ml, goal_type }
+//                                                                     -> { calories, protein_g, carbs_g, fat_g, water_ml, goal_type, meal_split }
 //
 //  Segredo (Supabase → Project Settings → Edge Functions → Secrets):
 //   OPENROUTER_API_KEY
@@ -244,11 +244,27 @@ async function invokeOpenRouter(action, payload) {
           'considere-os ao pensar nas fontes de proteína/carboidrato implícitas nos macros. ' +
           'Além disso, estime uma meta diária de consumo de ÁGUA em ml, usando como base ~35ml por kg de peso corporal, ' +
           'ajustada pra cima conforme o nível de atividade física semanal (mais treino = mais água). ' +
+          'Distribua também a meta de calorias entre as refeições (Café, Almoço, Lanche, Jantar, Ceia) em PERCENTUAIS que somem 100, ' +
+          'coerentes com o objetivo e com a rotina (ex.: mais peso no almoço/jantar; ceia leve). ' +
           'Responda ESTRITAMENTE com JSON, sem markdown, no formato: ' +
-          '{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"water_ml":0,"goal_type":"cutting"}. ' +
+          '{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"water_ml":0,"goal_type":"cutting","meal_split":{"Café":25,"Almoço":35,"Lanche":10,"Jantar":25,"Ceia":5}}. ' +
           '"goal_type" deve ser exatamente "cutting" (emagrecer), "manutencao" ou "bulking" (ganhar peso), conforme o objetivo. Valores numéricos inteiros.',
         bioText + buildProfileText(payload?.profile),
       )
+      // meal_split só é aceito se tiver as 5 refeições e somar ~100
+      let mealSplit: Record<string, number> | undefined
+      const ms = json.meal_split
+      if (ms && typeof ms === 'object') {
+        const meals = ['Café', 'Almoço', 'Lanche', 'Jantar', 'Ceia']
+        const clean: Record<string, number> = {}
+        let sum = 0
+        for (const m of meals) {
+          const v = Number(ms[m]) || 0
+          clean[m] = v
+          sum += v
+        }
+        if (sum >= 95 && sum <= 105) mealSplit = clean
+      }
       return {
         calories: Number(json.calories) || 0,
         protein_g: Number(json.protein_g) || 0,
@@ -256,6 +272,7 @@ async function invokeOpenRouter(action, payload) {
         fat_g: Number(json.fat_g) || 0,
         water_ml: Number(json.water_ml) || 0,
         goal_type: ['cutting', 'manutencao', 'bulking'].includes(json.goal_type) ? json.goal_type : undefined,
+        meal_split: mealSplit,
       }
     }
     default:

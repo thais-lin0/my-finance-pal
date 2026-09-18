@@ -32,6 +32,7 @@ import {
   useHealthDay,
   computeWeightProgress,
   MEALS,
+  DEFAULT_MEAL_SPLIT,
   SHOPPING_CATEGORIES,
 } from '../hooks/useNutrition'
 import { callNutritionAI } from '../lib/nutritionAI'
@@ -194,6 +195,71 @@ function GoalSummary() {
 
 // ─────────────────────────── DIÁRIO ───────────────────────────
 const MEAL_ICONS = { Café: Coffee, Almoço: UtensilsCrossed, Lanche: Cookie, Jantar: Soup, Ceia: Moon }
+// Cor por refeição (usada na barra de progresso de cada card de refeição).
+const MEAL_ACCENT = {
+  Café: 'bg-amber-400',
+  Almoço: 'bg-brand-500',
+  Lanche: 'bg-violet-400',
+  Jantar: 'bg-emerald-500',
+  Ceia: 'bg-indigo-400',
+}
+
+// Editor da distribuição da meta diária de calorias entre as refeições.
+// Guarda percentuais por refeição em nutrition_goals.meal_split; a meta em
+// kcal de cada refeição é recalculada a partir da meta diária × percentual.
+function MealSplitEditor({ goals, saveGoals }) {
+  const initial = goals?.meal_split && Object.keys(goals.meal_split).length ? goals.meal_split : DEFAULT_MEAL_SPLIT
+  const [split, setSplit] = useState(initial)
+  useEffect(() => {
+    setSplit(goals?.meal_split && Object.keys(goals.meal_split).length ? goals.meal_split : DEFAULT_MEAL_SPLIT)
+  }, [goals?.meal_split])
+
+  const total = MEALS.reduce((s, m) => s + (Number(split[m]) || 0), 0)
+  const daily = Number(goals?.calories || 0)
+  const off = total !== 100
+
+  const setPct = (m, v) => setSplit((s) => ({ ...s, [m]: v }))
+  const persist = () => {
+    const clean = {}
+    for (const m of MEALS) clean[m] = Number(split[m]) || 0
+    saveGoals({ meal_split: clean })
+  }
+
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-ink-800">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Metas por refeição (%)</span>
+        <span className={`tnum text-xs font-semibold ${off ? 'text-coral' : 'text-emerald-500'}`}>
+          soma {total}%
+        </span>
+      </div>
+      {MEALS.map((m) => {
+        const pct = Number(split[m]) || 0
+        const kcal = Math.round((daily * pct) / 100)
+        return (
+          <label key={m} className="flex items-center justify-between gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <span className="flex-1">{m}</span>
+            <span className="tnum w-16 text-right text-xs text-slate-400">{kcal} kcal</span>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={split[m] ?? 0}
+              onChange={(e) => setPct(m, e.target.value)}
+              onBlur={persist}
+              className={`${inputCls} w-16 text-right`}
+            />
+          </label>
+        )
+      })}
+      {off && (
+        <p className="text-[11px] text-coral">
+          A soma deveria dar 100% (está {total}%). Ajuste os percentuais para dividir a meta certinho.
+        </p>
+      )}
+    </div>
+  )
+}
 
 function DiarioTab() {
   const [date, setDate] = useState(todayKey())
@@ -258,6 +324,7 @@ function DiarioTab() {
           fat_g: Number(res.fat_g) || day.goals.fat_g,
           water_ml_goal: Number(res.water_ml) || day.goals.water_ml_goal,
           goal_type: res.goal_type ?? day.goals.goal_type,
+          ...(res.meal_split && typeof res.meal_split === 'object' ? { meal_split: res.meal_split } : {}),
         })
       }
       setGoalsNote(res?.note ?? `Metas geradas pela IA (objetivo: ${res?.goal_type ?? day.goals.goal_type}), com base no seu perfil, meta de peso e na semana da Agenda.`)
@@ -451,6 +518,10 @@ function DiarioTab() {
                   />
                 </label>
               ))}
+
+              {/* distribuição da meta diária entre as refeições (%) */}
+              <MealSplitEditor goals={day.goals} saveGoals={day.saveGoals} />
+
               <label className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
                 Objetivo
                 <select
@@ -468,36 +539,86 @@ function DiarioTab() {
         </div>
       </div>
 
-      {/* refeições do dia, largura total */}
-      <div className="space-y-4">
-        {MEALS.map((m) => {
-          const rows = day.byMeal[m] ?? []
-          if (!rows.length) return null
-          const mealTotal = rows.reduce((sum, l) => sum + Number(l.calories || 0), 0)
-          return (
-            <div key={m} className={card}>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">{m}</h3>
-                <span className="tnum text-sm font-semibold text-brand-600 dark:text-brand-300">{Math.round(mealTotal)} kcal</span>
+      {/* refeições do dia — cada uma com sua meta de calorias (fatia da meta
+          diária) e barra de progresso própria; grade responsiva */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Refeições do dia
+          </h3>
+          <span className="text-xs text-slate-400">meta de cada refeição = fatia da meta diária</span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {MEALS.map((m) => {
+            const rows = day.byMeal[m] ?? []
+            const consumed = Math.round(day.mealTotals[m] ?? 0)
+            const target = day.mealGoals[m] ?? 0
+            const pct = target > 0 ? Math.min(100, Math.round((consumed / target) * 100)) : 0
+            const over = target > 0 && consumed > target
+            const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
+            const active = meal === m
+            return (
+              <div
+                key={m}
+                className={`${card} flex flex-col ${active ? 'ring-2 ring-brand-400 dark:ring-brand-500' : ''}`}
+              >
+                {/* cabeçalho clicável: seleciona a refeição pro campo de IA acima */}
+                <button
+                  onClick={() => setMeal(m)}
+                  title={`Lançar em ${m}`}
+                  className="mb-2 flex items-center justify-between text-left"
+                >
+                  <span className="flex items-center gap-2 font-display font-bold text-slate-800 dark:text-slate-100">
+                    <Icon size={16} className="text-slate-400" /> {m}
+                  </span>
+                  <span className={`tnum text-sm font-semibold ${over ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
+                    {consumed}
+                    <span className="text-slate-400"> / {target || '—'} kcal</span>
+                  </span>
+                </button>
+
+                {/* barra de progresso da refeição */}
+                <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
+                  <div
+                    className={`h-full rounded-full transition-all ${over ? 'bg-coral' : MEAL_ACCENT[m] ?? 'bg-brand-500'}`}
+                    style={{ width: `${target > 0 ? Math.min(100, (consumed / target) * 100) : 0}%` }}
+                  />
+                </div>
+                {over && (
+                  <p className="-mt-2 mb-2 text-[11px] font-medium text-coral">
+                    {consumed - target} kcal acima da meta desta refeição
+                  </p>
+                )}
+
+                {/* entradas da refeição */}
+                {rows.length ? (
+                  <ul className="flex-1 divide-y divide-slate-100 dark:divide-ink-800/60">
+                    {rows.map((l) => (
+                      <li key={l.id} className="flex items-center justify-between py-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{l.description}</span>
+                        <div className="ml-2 flex shrink-0 items-center gap-2">
+                          <span className="tnum text-xs text-slate-400">
+                            {Math.round(Number(l.calories))} kcal
+                          </span>
+                          <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <button
+                    onClick={() => setMeal(m)}
+                    className="flex-1 rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 transition hover:border-brand-300 hover:text-brand-500 dark:border-ink-700 dark:hover:border-brand-700"
+                  >
+                    Nada lançado — clique e descreva o que comeu acima
+                  </button>
+                )}
               </div>
-              <ul className="divide-y divide-slate-100 dark:divide-ink-800/60">
-                {rows.map((l) => (
-                  <li key={l.id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-slate-700 dark:text-slate-200">{l.description}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="tnum text-slate-400">
-                        {Math.round(Number(l.calories))} kcal · P{Math.round(Number(l.protein_g))} C{Math.round(Number(l.carbs_g))} G{Math.round(Number(l.fat_g))}
-                      </span>
-                      <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )
