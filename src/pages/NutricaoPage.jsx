@@ -261,6 +261,79 @@ function MealSplitEditor({ goals, saveGoals }) {
   )
 }
 
+// Card de passos do dia: total manual + meta editável, com barra de progresso
+// e indicação de meta batida. Só informativo.
+function StepsCard({ health, date }) {
+  const [editingGoal, setEditingGoal] = useState(false)
+  const steps = health.data?.steps ?? null
+  const goal = health.data?.steps_goal ?? 8000
+  const hit = steps != null && goal > 0 && steps >= goal
+  const pct = steps != null && goal > 0 ? Math.min(100, Math.round((steps / goal) * 100)) : 0
+
+  return (
+    <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+          <Footprints size={14} /> Passos
+        </div>
+        {editingGoal ? (
+          <input
+            type="number"
+            inputMode="numeric"
+            autoFocus
+            defaultValue={goal}
+            onBlur={(e) => {
+              const v = e.target.value
+              if (String(v) !== String(goal)) health.saveStepsGoal(v)
+              setEditingGoal(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+            className="w-20 rounded border border-emerald-300 bg-white px-1 py-0.5 text-right text-[11px] tabular-nums text-slate-700 outline-none dark:border-emerald-700 dark:bg-ink-900 dark:text-slate-200"
+          />
+        ) : (
+          <button
+            onClick={() => setEditingGoal(true)}
+            className="text-[11px] text-emerald-700/70 hover:text-emerald-700 dark:text-emerald-300/70 dark:hover:text-emerald-300"
+            title="Editar meta de passos"
+          >
+            meta {goal.toLocaleString('pt-BR')} ✎
+          </button>
+        )}
+      </div>
+
+      <input
+        type="number"
+        inputMode="numeric"
+        defaultValue={steps ?? ''}
+        key={`steps-${date}-${steps ?? ''}`}
+        onBlur={(e) => {
+          const v = e.target.value
+          if (String(v) !== String(steps ?? '')) health.saveSteps(v)
+        }}
+        placeholder="—"
+        className="mt-1 w-full bg-transparent text-xl font-bold tabular-nums text-slate-800 outline-none placeholder:text-slate-300 dark:text-slate-100"
+      />
+
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950/60">
+        <div
+          className={`h-full rounded-full transition-all ${hit ? 'bg-emerald-500' : 'bg-emerald-400/80'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+        {steps == null
+          ? 'digite o total do dia'
+          : hit
+            ? '🎉 meta batida!'
+            : `faltam ${(goal - steps).toLocaleString('pt-BR')} passos`}
+      </div>
+    </div>
+  )
+}
+
 function DiarioTab() {
   const [date, setDate] = useState(todayKey())
   const day = useNutritionDay(date)
@@ -467,26 +540,7 @@ function DiarioTab() {
               </div>
             </div>
 
-            <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/30">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                <Footprints size={14} /> Passos
-              </div>
-              <input
-                type="number"
-                inputMode="numeric"
-                defaultValue={health.data?.steps ?? ''}
-                key={`steps-${date}-${health.data?.steps ?? ''}`}
-                onBlur={(e) => {
-                  const v = e.target.value
-                  if (String(v) !== String(health.data?.steps ?? '')) health.saveSteps(v)
-                }}
-                placeholder="—"
-                className="mt-1 w-full bg-transparent text-xl font-bold tabular-nums text-slate-800 outline-none placeholder:text-slate-300 dark:text-slate-100"
-              />
-              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                digite o total do dia
-              </div>
-            </div>
+            <StepsCard health={health} date={date} />
           </div>
 
           {goalsOpen && (
