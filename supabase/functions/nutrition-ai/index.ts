@@ -14,17 +14,24 @@
 //
 //  Ações suportadas (body.action):
 //   - "parse_food"   { text, profile? }                              -> { items: [{description, calories, protein_g, carbs_g, fat_g}] }
+//                     Usa o FatSecret NLP (dados nutricionais reais) quando
+//                     FATSECRET_KEY/FATSECRET_SECRET estão configurados; se o
+//                     FatSecret não reconhecer os alimentos (erro 211) ou não
+//                     estiver configurado, cai no OpenRouter (estimativa do LLM).
 //   - "meal_plan"    { goals?, profile? }                             -> { plan: [{weekday, meal, description, calories}] }
 //   - "shopping_list"{ plan?, profile? }                              -> { items: [{name, quantity, category}] }
 //   - "insights"     { logs?, goals?, profile? }                      -> { summary, tips: [] }
 //   - "macro_goals"  { age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
 //                                                                     -> { calories, protein_g, carbs_g, fat_g, water_ml, goal_type, meal_split }
 //
-//  Segredo (Supabase → Project Settings → Edge Functions → Secrets):
-//   OPENROUTER_API_KEY
-//  NUNCA coloque essa chave no .env do frontend (VITE_*) — qualquer
+//  Segredos (Supabase → Project Settings → Edge Functions → Secrets):
+//   OPENROUTER_API_KEY                 (LLM: cardápio, insights, metas, fallback do parse_food)
+//   FATSECRET_KEY / FATSECRET_SECRET   (FatSecret OAuth 1.0 — nutrição real no parse_food)
+//  NUNCA coloque essas chaves no .env do frontend (VITE_*) — qualquer
 //  variável VITE_ vai parar no bundle JS público. Configure só como
-//  secret da Edge Function: `supabase secrets set OPENROUTER_API_KEY=...`
+//  secret da Edge Function:
+//    supabase secrets set OPENROUTER_API_KEY=...
+//    supabase secrets set FATSECRET_KEY=... FATSECRET_SECRET=...
 // ─────────────────────────────────────────────────────────────
 
 // @ts-nocheck
@@ -70,6 +77,120 @@ function buildProfileText(profile) {
 
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENROUTER_ENABLED = Boolean(OPENROUTER_API_KEY)
+
+// ─────────────────────────────────────────────────────────────
+//  FatSecret Platform API — Natural Language Processing (nutrição real)
+//  Autenticação OAuth 1.0 (HMAC-SHA1). Diferente do OAuth 2.0, não exige
+//  buscar um token antes nem depende de IP fixo (a assinatura autentica
+//  cada requisição) — ideal para Edge Function sem IP estável.
+//  Docs: https://platform.fatsecret.com/docs/v1/natural.language.processing
+// ─────────────────────────────────────────────────────────────
+const FATSECRET_KEY = Deno.env.get('FATSECRET_KEY')
+const FATSECRET_SECRET = Deno.env.get('FATSECRET_SECRET')
+const FATSECRET_ENABLED = Boolean(FATSECRET_KEY && FATSECRET_SECRET)
+const FATSECRET_NLP_URL = 'https://platform.fatsecret.com/rest/natural-language-processing/v1'
+
+// Codificação percentual estrita do OAuth 1.0 (RFC 3986): só A-Za-z0-9-_.~
+// ficam livres; todo o resto é %XX maiúsculo.
+function oauthEncode(str) {
+  return encodeURIComponent(String(str)).replace(
+    /[!*'()]/g,
+    (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase(),
+  )
+}
+
+// Assina uma requisição OAuth 1.0 e retorna o header Authorization.
+// O body JSON do NLP NÃO entra na base string (só os parâmetros oauth_*),
+// conforme OAuth 1.0 para corpos non-form-encoded.
+async function oauth1Header(method, url, secret, key) {
+  const params = {
+    oauth_consumer_key: key,
+    oauth_nonce: crypto.randomUUID().replace(/-/g, ''),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_version: '1.0',
+  }
+  // base string: METHOD&url&sorted-encoded-params
+  const paramString = Object.keys(params)
+    .sort()
+    .map((k) => `${oauthEncode(k)}=${oauthEncode(params[k])}`)
+    .join('&')
+  const baseString = [method.toUpperCase(), oauthEncode(url), oauthEncode(paramString)].join('&')
+  // signing key: consumerSecret& (sem token secret — 2-legged)
+  const signingKey = `${oauthEncode(secret)}&`
+
+  const enc = new TextEncoder()
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(signingKey),
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign'],
+  )
+  const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(baseString))
+  const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuf)))
+
+  const headerParams = { ...params, oauth_signature: signature }
+  const header =
+    'OAuth ' +
+    Object.keys(headerParams)
+      .sort()
+      .map((k) => `${oauthEncode(k)}="${oauthEncode(headerParams[k])}"`)
+      .join(', ')
+  return header
+}
+
+// Chama o FatSecret NLP com o texto livre da refeição e devolve os itens já
+// no formato que o Diário consome: {description, calories, protein_g, carbs_g, fat_g}.
+// Lança erro quando não há chaves, quando a API falha, ou quando nenhum
+// alimento é detectado (erro 211) — o chamador decide o fallback.
+async function fatsecretParse(text) {
+  const body = JSON.stringify({
+    user_input: text.slice(0, 1000), // limite de 1000 caracteres do endpoint
+    include_food_data: false,
+    // region/language (pt-BR) são Premier Exclusive; o reconhecimento do
+    // texto em português já funciona no plano padrão com a região US default.
+  })
+  const auth = await oauth1Header('POST', FATSECRET_NLP_URL, FATSECRET_SECRET, FATSECRET_KEY)
+  const resp = await fetch(FATSECRET_NLP_URL, {
+    method: 'POST',
+    headers: { Authorization: auth, 'Content-Type': 'application/json' },
+    body,
+  })
+  const raw = await resp.text()
+  if (!resp.ok) throw new Error(`FatSecret ${resp.status}: ${raw.slice(0, 300)}`)
+
+  let data
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    throw new Error('FatSecret: resposta não-JSON')
+  }
+  // erro estruturado da API (ex.: 211 "No food item detected")
+  if (data?.error) throw new Error(`FatSecret erro ${data.error.code}: ${data.error.message}`)
+
+  const responses = data?.food_response
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw new Error('FatSecret: nenhum alimento detectado')
+  }
+
+  const items = responses
+    .map((r) => {
+      const n = r?.eaten?.total_nutritional_content
+      if (!n) return null // item sem nutrição (ex.: serving não padrão de restaurante)
+      return {
+        description: r.food_entry_name || r?.eaten?.food_name_singular || 'Alimento',
+        calories: Math.round(Number(n.calories) || 0),
+        protein_g: Math.round(Number(n.protein) || 0),
+        carbs_g: Math.round(Number(n.carbohydrate) || 0),
+        fat_g: Math.round(Number(n.fat) || 0),
+      }
+    })
+    .filter(Boolean)
+
+  if (items.length === 0) throw new Error('FatSecret: itens sem informação nutricional')
+  return items
+}
 
 // Extrai o primeiro bloco JSON balanceado do texto (o modelo às vezes
 // envolve a resposta em ```json ... ``` ou adiciona texto solto ao redor).
@@ -141,17 +262,21 @@ async function chatJSON(systemPrompt, userPrompt, retries = 2) {
   throw lastError
 }
 
+async function openRouterParseFood(payload) {
+  const text = (payload?.text ?? '').trim() || 'Refeição não descrita.'
+  const json = await chatJSON(
+    'Você é um nutricionista. Estime calorias e macronutrientes da refeição descrita pelo usuário, em português do Brasil. ' +
+      'Responda ESTRITAMENTE com um JSON válido, sem markdown e sem texto fora do JSON, no formato: ' +
+      '{"items":[{"description":"...","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}. Valores numéricos, não strings.',
+    text + buildProfileText(payload?.profile),
+  )
+  return { items: Array.isArray(json.items) ? json.items : [] }
+}
+
 async function invokeOpenRouter(action, payload) {
   switch (action) {
     case 'parse_food': {
-      const text = (payload?.text ?? '').trim() || 'Refeição não descrita.'
-      const json = await chatJSON(
-        'Você é um nutricionista. Estime calorias e macronutrientes da refeição descrita pelo usuário, em português do Brasil. ' +
-          'Responda ESTRITAMENTE com um JSON válido, sem markdown e sem texto fora do JSON, no formato: ' +
-          '{"items":[{"description":"...","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}. Valores numéricos, não strings.',
-        text + buildProfileText(payload?.profile),
-      )
-      return { items: Array.isArray(json.items) ? json.items : [] }
+      return await openRouterParseFood(payload)
     }
     case 'meal_plan': {
       const goals = payload?.goals
@@ -280,7 +405,30 @@ async function invokeOpenRouter(action, payload) {
   }
 }
 
-// ---- Respostas mock (enquanto OPENROUTER_API_KEY não está configurado) ----
+// parse_food híbrido: FatSecret (nutrição real) → fallback OpenRouter (estimativa)
+// → mock (nada configurado). Cada item ganha `source` pra a UI poder sinalizar
+// de onde veio o número, se quiser.
+async function handleParseFood(payload) {
+  if (FATSECRET_ENABLED) {
+    const text = (payload?.text ?? '').trim()
+    if (text) {
+      try {
+        const items = await fatsecretParse(text)
+        return { items, source: 'fatsecret' }
+      } catch (e) {
+        // FatSecret não reconheceu / falhou → tenta o LLM, se disponível
+        console.warn('FatSecret falhou, tentando fallback:', String(e?.message ?? e))
+      }
+    }
+  }
+  if (OPENROUTER_ENABLED) {
+    const res = await openRouterParseFood(payload)
+    return { ...res, source: 'openrouter' }
+  }
+  return mockResponse('parse_food', payload)
+}
+
+// ---- Respostas mock (enquanto nenhuma IA está configurada) ----
 function mockResponse(action, payload) {
   switch (action) {
     case 'parse_food': {
@@ -312,7 +460,13 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const { action, ...payload } = await req.json()
-    const result = OPENROUTER_ENABLED ? await invokeOpenRouter(action, payload) : mockResponse(action, payload)
+    let result
+    if (action === 'parse_food') {
+      // parse_food tem caminho próprio (FatSecret → OpenRouter → mock)
+      result = await handleParseFood(payload)
+    } else {
+      result = OPENROUTER_ENABLED ? await invokeOpenRouter(action, payload) : mockResponse(action, payload)
+    }
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
