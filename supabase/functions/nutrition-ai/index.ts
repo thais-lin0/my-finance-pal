@@ -88,7 +88,10 @@ const OPENROUTER_ENABLED = Boolean(OPENROUTER_API_KEY)
 const FATSECRET_KEY = Deno.env.get('FATSECRET_KEY')
 const FATSECRET_SECRET = Deno.env.get('FATSECRET_SECRET')
 const FATSECRET_ENABLED = Boolean(FATSECRET_KEY && FATSECRET_SECRET)
-const FATSECRET_NLP_URL = 'https://platform.fatsecret.com/rest/natural-language-processing/v1'
+// OAuth 1.0 usa o endpoint "method-based" server.api (o endpoint URL-based
+// /rest/natural-language-processing/v1 é do OAuth 2.0 e devolve erro 10
+// "API was not resolved" quando chamado por assinatura OAuth 1.0).
+const FATSECRET_API_URL = 'https://platform.fatsecret.com/rest/server.api'
 
 // Codificação percentual estrita do OAuth 1.0 (RFC 3986): só A-Za-z0-9-_.~
 // ficam livres; todo o resto é %XX maiúsculo.
@@ -100,23 +103,25 @@ function oauthEncode(str) {
 }
 
 // Assina uma requisição OAuth 1.0 e retorna o header Authorization.
-// O body JSON do NLP NÃO entra na base string (só os parâmetros oauth_*),
-// conforme OAuth 1.0 para corpos non-form-encoded.
-async function oauth1Header(method, url, secret, key) {
+// `extraParams` são os parâmetros de query (ex.: method, format) que TAMBÉM
+// entram na base string da assinatura, junto dos oauth_*. O body JSON não
+// entra (só parâmetros de query/form, conforme OAuth 1.0).
+async function oauth1Header(method, url, secret, key, extraParams = {}) {
   const params = {
+    ...extraParams,
     oauth_consumer_key: key,
     oauth_nonce: crypto.randomUUID().replace(/-/g, ''),
     oauth_signature_method: 'HMAC-SHA1',
     oauth_timestamp: String(Math.floor(Date.now() / 1000)),
     oauth_version: '1.0',
   }
-  // base string: METHOD&url&sorted-encoded-params
+  // base string: METHOD&url&sorted-encoded-params (inclui method/format + oauth_*)
   const paramString = Object.keys(params)
     .sort()
     .map((k) => `${oauthEncode(k)}=${oauthEncode(params[k])}`)
     .join('&')
   const baseString = [method.toUpperCase(), oauthEncode(url), oauthEncode(paramString)].join('&')
-  // signing key: consumerSecret& (sem token secret — 2-legged)
+  // signing key: consumerSecret& (sem access token secret — 2-legged)
   const signingKey = `${oauthEncode(secret)}&`
 
   const enc = new TextEncoder()
@@ -130,7 +135,16 @@ async function oauth1Header(method, url, secret, key) {
   const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(baseString))
   const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuf)))
 
-  const headerParams = { ...params, oauth_signature: signature }
+  // O header Authorization carrega SÓ os parâmetros oauth_* + a assinatura;
+  // os parâmetros de negócio (method/format) vão na query string da URL.
+  const headerParams = {
+    oauth_consumer_key: params.oauth_consumer_key,
+    oauth_nonce: params.oauth_nonce,
+    oauth_signature_method: params.oauth_signature_method,
+    oauth_timestamp: params.oauth_timestamp,
+    oauth_version: params.oauth_version,
+    oauth_signature: signature,
+  }
   const header =
     'OAuth ' +
     Object.keys(headerParams)
@@ -145,14 +159,23 @@ async function oauth1Header(method, url, secret, key) {
 // Lança erro quando não há chaves, quando a API falha, ou quando nenhum
 // alimento é detectado (erro 211) — o chamador decide o fallback.
 async function fatsecretParse(text) {
+  // parâmetros de query (entram na assinatura E na URL)
+  const query = { method: 'natural_language_processing', format: 'json' }
+  const qs = Object.keys(query)
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`)
+    .join('&')
+  const requestUrl = `${FATSECRET_API_URL}?${qs}`
+
+  // body JSON — NÃO entra na base string da assinatura
   const body = JSON.stringify({
     user_input: text.slice(0, 1000), // limite de 1000 caracteres do endpoint
     include_food_data: false,
     // region/language (pt-BR) são Premier Exclusive; o reconhecimento do
     // texto em português já funciona no plano padrão com a região US default.
   })
-  const auth = await oauth1Header('POST', FATSECRET_NLP_URL, FATSECRET_SECRET, FATSECRET_KEY)
-  const resp = await fetch(FATSECRET_NLP_URL, {
+
+  const auth = await oauth1Header('POST', FATSECRET_API_URL, FATSECRET_SECRET, FATSECRET_KEY, query)
+  const resp = await fetch(requestUrl, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/json' },
     body,
