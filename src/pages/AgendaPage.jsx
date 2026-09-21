@@ -76,6 +76,27 @@ export default function AgendaPage() {
   const cardProps = { onEdit: openEdit, onDelete: ag.removeActivity, onCycleStatus: cycleStatus }
   const cur = todayIdx()
 
+  // ── Arrastar-e-soltar entre colunas (visão Quadro) ──
+  const [dragId, setDragId] = useState(null)
+  const [dragFrom, setDragFrom] = useState(null)
+  const [dropCol, setDropCol] = useState(null) // coluna destacada durante o hover
+  const onDragStart = (a) => (e) => {
+    setDragId(a.id)
+    setDragFrom(a.weekday)
+    e.dataTransfer.effectAllowed = 'move'
+    // necessário no Firefox pra o drag iniciar
+    try { e.dataTransfer.setData('text/plain', String(a.id)) } catch { /* ignore */ }
+  }
+  const onDragEnd = () => { setDragId(null); setDragFrom(null); setDropCol(null) }
+  const onColumnDrop = (weekday) => (e) => {
+    e.preventDefault()
+    setDropCol(null)
+    if (dragId == null || weekday === dragFrom) { onDragEnd(); return }
+    // otimista: updateActivity já atualiza o estado local sem refetch (não pisca)
+    ag.updateActivity(dragId, { weekday })
+    onDragEnd()
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-5 py-6 lg:px-8">
       {/* cabeçalho */}
@@ -207,8 +228,15 @@ export default function AgendaPage() {
               return (
                 <div
                   key={day}
-                  className={`flex w-72 shrink-0 flex-col rounded-2xl border bg-slate-50/60 dark:bg-ink-950/40 ${
-                    isToday ? 'border-brand-300 dark:border-brand-800' : 'border-slate-200 dark:border-ink-800'
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dropCol !== i) setDropCol(i) }}
+                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropCol((c) => (c === i ? null : c)) }}
+                  onDrop={onColumnDrop(i)}
+                  className={`flex w-72 shrink-0 flex-col rounded-2xl border bg-slate-50/60 transition dark:bg-ink-950/40 ${
+                    dropCol === i && dragFrom !== i
+                      ? 'border-brand-400 ring-2 ring-brand-300 dark:border-brand-600'
+                      : isToday
+                        ? 'border-brand-300 dark:border-brand-800'
+                        : 'border-slate-200 dark:border-ink-800'
                   }`}
                   style={{ height: 'calc(100vh - 320px)', minHeight: '420px' }}
                 >
@@ -239,7 +267,15 @@ export default function AgendaPage() {
                       </button>
                     )}
                     {activities.map((a) => (
-                      <ActivityCard key={a.id} activity={a} {...cardProps} />
+                      <ActivityCard
+                        key={a.id}
+                        activity={a}
+                        {...cardProps}
+                        draggable
+                        onDragStart={onDragStart(a)}
+                        onDragEnd={onDragEnd}
+                        dragging={dragId === a.id}
+                      />
                     ))}
                   </div>
                 </div>

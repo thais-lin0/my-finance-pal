@@ -30,12 +30,16 @@ const tickStyle = {
 }
 
 // Card de atividade compartilhado entre as visões Lista e Quadro.
-export default function ActivityCard({ activity: a, onEdit, onDelete, onCycleStatus }) {
+// Na visão Quadro, `draggable` habilita o arrastar-e-soltar entre colunas (dias).
+export default function ActivityCard({ activity: a, onEdit, onDelete, onCycleStatus, draggable = false, onDragStart, onDragEnd, dragging = false }) {
   return (
     <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={`group rounded-xl p-3 transition ${catBg[a.category] ?? 'bg-slate-50 dark:bg-ink-800/60'} ${
         statusOpacity[a.status] ?? ''
-      }`}
+      } ${draggable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'opacity-40 ring-2 ring-brand-400' : ''}`}
     >
       <div className="flex items-start gap-2.5">
         <button
