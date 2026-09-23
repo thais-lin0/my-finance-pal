@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import {
   Home,
@@ -14,8 +14,10 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronRight,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
 
 // Navegação agrupada por módulo da vida.
 const groups = [
@@ -40,9 +42,44 @@ const groups = [
   },
 ]
 
+// Iniciais a partir do nome (fallback quando não há avatar).
+function initials(name, email) {
+  const base = (name || email || '').trim()
+  if (!base) return '?'
+  const parts = base.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return base.slice(0, 2).toUpperCase()
+}
+
 export default function AppLayout({ dark, onToggleTheme }) {
   const { user, signOut } = useAuth()
   const [open, setOpen] = useState(false) // drawer mobile
+  const [displayName, setDisplayName] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
+
+  // Busca o nome de exibição da profiles; cai no metadata/email enquanto carrega.
+  useEffect(() => {
+    if (!user) return
+    const fallback =
+      user.user_metadata?.display_name || user.email?.split('@')[0] || ''
+    setDisplayName(fallback)
+    setAvatarUrl(user.user_metadata?.avatar_url || '')
+    let active = true
+    supabase
+      .from('profiles')
+      .select('display_name, avatar_url')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return
+        if (data?.display_name) setDisplayName(data.display_name)
+        if (data?.avatar_url) setAvatarUrl(data.avatar_url)
+      })
+    return () => {
+      active = false
+    }
+  }, [user])
+
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('mlp.sidebar') === 'collapsed')
 
   const toggleCollapsed = () => {
@@ -148,11 +185,51 @@ export default function AppLayout({ dark, onToggleTheme }) {
       </nav>
 
       <div className={`space-y-2 border-t border-slate-200 py-3 dark:border-ink-800 ${mini ? 'px-2' : 'px-3'}`}>
-        {!mini && (
-          <p className="truncate px-2 text-xs text-slate-400" title={user?.email}>
-            {user?.email}
-          </p>
-        )}
+        <NavLink
+          to="/perfil"
+          onClick={() => setOpen(false)}
+          title={mini ? `${displayName} · Perfil` : 'Abrir perfil'}
+          className={({ isActive }) =>
+            `group flex items-center rounded-xl border transition ${
+              mini ? 'justify-center p-1.5' : 'gap-2.5 px-2 py-2'
+            } ${
+              isActive
+                ? 'border-brand-500/40 bg-brand-500/10 dark:border-brand-500/40 dark:bg-brand-500/15'
+                : 'border-slate-200 hover:border-brand-500/40 hover:bg-slate-100 dark:border-ink-700 dark:hover:bg-ink-800'
+            }`
+          }
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-500 text-xs font-bold text-white">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            ) : (
+              initials(displayName, user?.email)
+            )}
+          </span>
+          {!mini && (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={displayName}>
+                  {displayName}
+                </span>
+                <span className="block truncate text-xs text-slate-400" title={user?.email}>
+                  {user?.email}
+                </span>
+              </span>
+              <ChevronRight
+                size={16}
+                className="shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500"
+              />
+            </>
+          )}
+        </NavLink>
         <div className={`flex gap-2 ${mini ? 'flex-col' : ''}`}>
           <button
             onClick={onToggleTheme}
@@ -180,7 +257,7 @@ export default function AppLayout({ dark, onToggleTheme }) {
     <div className="min-h-screen lg:flex">
       {/* sidebar desktop (largura alterna entre 64 e 256px) */}
       <aside
-        className={`hidden shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 dark:border-ink-800 dark:bg-ink-900 lg:block ${
+        className={`sticky top-0 hidden h-screen shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 dark:border-ink-800 dark:bg-ink-900 lg:block ${
           collapsed ? 'w-16' : 'w-64'
         }`}
       >

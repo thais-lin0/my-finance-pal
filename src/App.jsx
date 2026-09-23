@@ -13,6 +13,7 @@ import FinancasPage from './pages/FinancasPage'
 import InvestimentosPage from './pages/InvestimentosPage'
 import AgendaPage from './pages/AgendaPage'
 import NutricaoPage from './pages/NutricaoPage'
+import PerfilPage from './pages/PerfilPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="/financeiro/investimentos" element={<InvestimentosPage />} />
               <Route path="/agenda" element={<AgendaPage />} />
               <Route path="/nutricao" element={<NutricaoPage />} />
+              <Route path="/perfil" element={<PerfilPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

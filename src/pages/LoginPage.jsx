@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 export default function LoginPage() {
   const { user, signIn, signUp } = useAuth()
   const [mode, setMode] = useState('signin') // signin | signup
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [msg, setMsg] = useState(null)
@@ -22,7 +23,7 @@ export default function LoginPage() {
         const { error } = await signIn(email, password)
         if (error) throw error
       } else {
-        const { error } = await signUp(email, password)
+        const { error } = await signUp(email, password, name.trim() || undefined)
         if (error) throw error
         setMsg({
           type: 'ok',
@@ -52,6 +53,21 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={submit} className="space-y-4">
+          {mode === 'signup' && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300">
+                Nome
+              </label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                placeholder="Como quer ser chamada(o)"
+              />
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300">
               Email
