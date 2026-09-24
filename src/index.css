@@ -41,3 +41,46 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Impressão / Exportar PDF da análise nutricional ──────────────────
+   Ao imprimir (window.print), isola #plan-analysis-print: esconde todo o
+   resto da página (sidebar, abas, botões) e imprime só a análise, em fundo
+   branco e cores legíveis independente do tema. */
+@media print {
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  /* esconde tudo por padrão… */
+  body * {
+    visibility: hidden;
+  }
+  /* …e revela só a árvore da análise */
+  #plan-analysis-print,
+  #plan-analysis-print * {
+    visibility: visible;
+  }
+  #plan-analysis-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 12mm;
+  }
+  /* elementos marcados pra não sair no PDF */
+  .print\:hidden {
+    display: none !important;
+  }
+  /* força superfícies claras e evita quebrar cards no meio da página */
+  #plan-analysis-print .shadow-card,
+  #plan-analysis-print table {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border-color: #e2e8f0 !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+  #plan-analysis-print .shadow-card * {
+    color: #1e293b !important;
+  }
+}

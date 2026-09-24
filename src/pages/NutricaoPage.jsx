@@ -540,6 +540,11 @@ function DiarioTab({ pendingAction, consumeAction }) {
               <ChevronDown size={13} className={`transition-transform ${goalsOpen ? 'rotate-180' : ''}`} />
             </button>
           </div>
+          {day.goals._periodized && (
+            <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+              <CalendarRange size={12} /> Meta periodizada para hoje ({day.goals.calories} kcal · base {day.goals._baseCalories})
+            </div>
+          )}
           <MacroProgress
             totals={day.totals}
             goals={day.goals}

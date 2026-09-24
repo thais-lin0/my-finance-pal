@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useDietaryProfile } from '../hooks/useNutrition'
 import NextSteps from './NextSteps'
+import PlanAnalysis from './PlanAnalysis'
 
 // ─────────────────────────────────────────────────────────────────────
 //  Onboarding da anamnese nutricional.
@@ -448,6 +449,11 @@ function Summary({ profile, onEdit, onNavigate, celebrate }) {
         subtitle="Seu perfil alimenta cada uma destas ações."
         steps={steps}
       />
+
+      {/* Análise nutricional individualizada (IA) + exportar PDF */}
+      <div className="border-t border-slate-100 pt-5 dark:border-ink-800">
+        <PlanAnalysis />
+      </div>
 
       {/* Resumo do perfil */}
       <div className={`${card} space-y-2`}>

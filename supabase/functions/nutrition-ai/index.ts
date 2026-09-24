@@ -26,6 +26,12 @@
 //   - "insights"     { logs?, goals?, profile? }                      -> { summary, tips: [] }
 //   - "macro_goals"  { age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
 //                                                                     -> { calories, protein_g, carbs_g, fat_g, water_ml, goal_type, meal_split }
+//   - "plan_analysis"{ age?, height_cm?, weight_kg?, activities?, target_weight?, target_date?, profile? }
+//                     Análise nutricional individualizada e auditável (não é
+//                     prescrição). -> { headline, energy{tmb,tmb_equation,...},
+//                     goal, weekly[7 dias com kcal/macros/treino], protein,
+//                     supplements, calibration, gaps, safety, references[DOI],
+//                     disclaimer }
 //
 //  Segredos (Supabase → Project Settings → Edge Functions → Secrets):
 //   OPENROUTER_API_KEY                 (LLM: cardápio, insights, metas, fallback do parse_food)
@@ -533,6 +539,88 @@ async function invokeOpenRouter(action, payload) {
         meal_split: mealSplit,
       }
     }
+    case 'plan_analysis': {
+      const { age, height_cm, weight_kg, activities, target_weight, target_date } = payload ?? {}
+      const activityText =
+        Array.isArray(activities) && activities.length
+          ? `Atividades físicas registradas na Agenda desta semana: ${activities.map((a) => `${a.count}x ${a.category}`).join(', ')}.`
+          : 'Nenhuma atividade registrada na Agenda esta semana.'
+      const bioText =
+        `Dados de Medidas do app — Idade: ${age ?? '?'} anos. Peso: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ` +
+        `Meta de peso: ${target_weight ?? 'não definida'}${target_date ? ` até ${target_date}` : ''}. ${activityText}`
+
+      const json = await chatJSON(
+        'Você é um nutricionista esportivo baseado em evidência. Produza uma ANÁLISE NUTRICIONAL INDIVIDUALIZADA a partir da anamnese ' +
+          'do usuário (PERFIL abaixo) e dos dados de Medidas/Agenda. Siga estas regras com rigor:\n' +
+          '1. HONESTIDADE: separe o que foi MEDIDO do que foi ESTIMADO. Enquadre como hipótese inicial a calibrar, NÃO prescrição médica.\n' +
+          '2. NÃO invente dados ausentes; liste-os como lacunas. Campos ausentes no perfil são lacunas reais.\n' +
+          '3. TMB por Mifflin-St Jeor: escreva a equação com os números do usuário. Homens: 10*peso+6.25*altura-5*idade+5; Mulheres: 10*peso+6.25*altura-5*idade-161. Se faltar sexo, calcule os dois e explique.\n' +
+          '4. TDEE = TMB * fator de atividade (1.2 sedentário a 1.9 muito ativo), escolhido pela rotina; declare o fator e a incerteza (±10-20%).\n' +
+          '5. Ajuste pela meta: hipertrofia +10-15%; perda de gordura -15-25% (máx ~1%/semana); recomposição ~manutenção.\n' +
+          '6. Proteína: 1.6 g/kg é o platô, 2.2 g/kg o teto (Morton 2018, doi:10.1136/bjsports-2017-097608); distribua >=0.4 g/kg por refeição.\n' +
+          '7. Carboidrato periodizado por dia: mais nos dias de treino intenso/endurance, menos no descanso. Gordura: piso ~0.8 g/kg.\n' +
+          '8. TABELA POR DIA DA SEMANA (0=Segunda..6=Domingo): para CADA dia, casar com o treino daquele dia (da rotina do perfil), definindo kcal, proteína, carbo e gordura. Dias de corrida/treino pesado sobem (mais carbo); descanso desce.\n' +
+          '9. TRIAGEM DE SEGURANÇA: se houver doença renal, diabetes tipo 1/insulina, gestação/amamentação, histórico de transtorno alimentar, IMC<18.5 com meta de perda, ou menor de 18 — sinalize em "safety" e recomende acompanhamento; não prescreva restrição.\n' +
+          'Responda ESTRITAMENTE com JSON válido, sem markdown, neste formato:\n' +
+          '{' +
+          '"headline":"decisão central em 1-2 frases (ex: começar em ~2200 kcal/dia na média, mais carbo nos dias de corrida)",' +
+          '"energy":{"tmb":0,"tmb_equation":"10*60+6.25*172-5*30-161 = 1364 kcal","tmb_method":"Mifflin-St Jeor (mulheres)","activity_factor":1.5,"tdee":0,"tdee_note":"estimado por TMB*fator; ±15%"},' +
+          '"goal":{"type":"hipertrofia|perda_gordura|recomposicao|manutencao","adjustment":"+12% sobre o TDEE","target_avg_calories":0},' +
+          '"weekly":[{"weekday":0,"day":"Segunda","training":"Corrida 5-7km","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"note":"mais carbo pré-corrida"}],' +
+          '"weekly_avg_calories":0,' +
+          '"protein":{"target_g_per_kg":1.8,"total_g":0,"per_meal_g":0,"rationale":"1.6-2.2 g/kg (Morton 2018)"},' +
+          '"supplements":[{"name":"Creatina","dose":"3-5 g/dia","rationale":"evidência forte p/ força"}],' +
+          '"calibration":["média móvel semanal de peso (nunca peso pontual)","peso estável em hipertrofia -> +150-200 kcal de carbo"],' +
+          '"gaps":["dado ausente 1","dado ausente 2"],' +
+          '"safety":["ressalva de segurança ou string vazia se nenhuma"],' +
+          '"references":[{"label":"Morton et al. 2018","doi":"10.1136/bjsports-2017-097608"}],' +
+          '"disclaimer":"Material educacional; não substitui avaliação individual por nutricionista/médico."' +
+          '}. ' +
+          'A tabela "weekly" DEVE ter 7 itens (weekday 0 a 6). Valores numéricos inteiros para kcal/macros. Só cite DOI que realmente usou.',
+        bioText + buildProfileText(payload?.profile),
+      )
+
+      // Normaliza a tabela semanal: garante 7 dias 0..6, números inteiros.
+      const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+      const rawWeekly = Array.isArray(json.weekly) ? json.weekly : []
+      const byDay: Record<number, any> = {}
+      for (const w of rawWeekly) {
+        const wd = Number(w?.weekday)
+        if (wd >= 0 && wd <= 6) byDay[wd] = w
+      }
+      const weekly = DIAS.map((day, wd) => {
+        const w = byDay[wd] ?? {}
+        return {
+          weekday: wd,
+          day,
+          training: typeof w.training === 'string' ? w.training : '',
+          calories: Math.round(Number(w.calories) || 0),
+          protein_g: Math.round(Number(w.protein_g) || 0),
+          carbs_g: Math.round(Number(w.carbs_g) || 0),
+          fat_g: Math.round(Number(w.fat_g) || 0),
+          note: typeof w.note === 'string' ? w.note : '',
+        }
+      })
+
+      return {
+        headline: typeof json.headline === 'string' ? json.headline : '',
+        energy: json.energy ?? null,
+        goal: json.goal ?? null,
+        weekly,
+        weekly_avg_calories: Math.round(Number(json.weekly_avg_calories) || 0),
+        protein: json.protein ?? null,
+        supplements: Array.isArray(json.supplements) ? json.supplements : [],
+        calibration: Array.isArray(json.calibration) ? json.calibration : [],
+        gaps: Array.isArray(json.gaps) ? json.gaps : [],
+        safety: Array.isArray(json.safety) ? json.safety.filter((s: string) => s && s.trim()) : [],
+        references: Array.isArray(json.references) ? json.references : [],
+        disclaimer:
+          typeof json.disclaimer === 'string' && json.disclaimer
+            ? json.disclaimer
+            : 'Material educacional; não substitui avaliação individual por nutricionista ou médico.',
+        generated_at: new Date().toISOString(),
+      }
+    }
     default:
       throw new Error(`Ação desconhecida: ${action}`)
   }
@@ -583,6 +671,22 @@ function mockResponse(action, payload) {
         mock: true,
         summary: 'IA não configurada. Defina OPENROUTER_API_KEY para receber análises automáticas.',
         tips: [],
+      }
+    case 'plan_analysis':
+      return {
+        mock: true,
+        headline: 'IA não configurada — configure OPENROUTER_API_KEY para gerar a análise.',
+        energy: null,
+        goal: null,
+        weekly: [],
+        weekly_avg_calories: 0,
+        protein: null,
+        supplements: [],
+        calibration: [],
+        gaps: [],
+        safety: [],
+        references: [],
+        disclaimer: 'Material educacional; não substitui avaliação individual por nutricionista ou médico.',
       }
     default:
       return { mock: true, error: `Ação desconhecida: ${action}` }

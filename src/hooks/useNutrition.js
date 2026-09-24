@@ -8,7 +8,17 @@ export const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', '
 
 // Distribuição padrão da meta diária de calorias entre as refeições (%).
 export const DEFAULT_MEAL_SPLIT = { 'Café': 25, 'Almoço': 35, 'Lanche': 10, 'Jantar': 25, 'Ceia': 5 }
-const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000, meal_split: DEFAULT_MEAL_SPLIT }
+const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000, meal_split: DEFAULT_MEAL_SPLIT, weekly_calories: {} }
+
+// Nomes dos dias na ordem 0=Segunda … 6=Domingo (usada em weekly_calories).
+export const WEEKDAY_LABELS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+
+// Índice 0=Segunda … 6=Domingo a partir de uma data YYYY-MM-DD.
+export function weekdayIndex(dateStr) {
+  if (!dateStr) return null
+  const js = new Date(dateStr + 'T00:00:00').getDay() // 0=Domingo … 6=Sábado
+  return (js + 6) % 7 // desloca pra 0=Segunda … 6=Domingo
+}
 
 // Diário + metas de um dia específico (logDate = YYYY-MM-DD).
 export function useNutritionDay(logDate) {
@@ -103,12 +113,28 @@ export function useNutritionDay(logDate) {
     return DEFAULT_MEAL_SPLIT
   }, [goals])
 
+  // Meta de calorias EFETIVA do dia: se houver periodização semanal
+  // (weekly_calories) com valor pro weekday desta data, ele sobrepõe a
+  // meta base; senão usa a base. Os macros continuam vindo da base — a
+  // periodização hoje ajusta só as calorias (o carbo é o que varia com
+  // treino; proteína/gordura ficam estáveis, como no modelo do PDF).
+  const dayGoals = useMemo(() => {
+    const wi = weekdayIndex(logDate)
+    const weekly = goals?.weekly_calories
+    const override =
+      wi != null && weekly && typeof weekly === 'object' ? Number(weekly[wi] ?? weekly[String(wi)]) : null
+    if (override && override > 0) {
+      return { ...goals, calories: override, _periodized: true, _baseCalories: goals.calories }
+    }
+    return { ...goals, _periodized: false, _baseCalories: goals.calories }
+  }, [goals, logDate])
+
   const mealGoals = useMemo(() => {
-    const dailyCal = Number(goals?.calories || 0)
+    const dailyCal = Number(dayGoals?.calories || 0)
     const out = {}
     for (const m of MEALS) out[m] = Math.round((dailyCal * Number(mealSplit[m] || 0)) / 100)
     return out
-  }, [goals, mealSplit])
+  }, [dayGoals, mealSplit])
 
   // Calorias consumidas por refeição (soma das entradas de cada refeição).
   const mealTotals = useMemo(() => {
@@ -122,7 +148,8 @@ export function useNutritionDay(logDate) {
   return {
     logs,
     byMeal,
-    goals,
+    goals: dayGoals,
+    baseGoals: goals,
     totals,
     mealSplit,
     mealGoals,
@@ -369,7 +396,13 @@ export function useDietaryProfile() {
     await saveProfile({ ...patch, onboarding_completed_at: new Date().toISOString() })
   }
 
-  return { profile, loading, reload: load, saveProfile, saveProgress, markComplete }
+  // Cacheia a última análise nutricional gerada pela IA (JSON estruturado),
+  // pra pessoa reabrir a aba e ver sem gastar outra chamada.
+  const saveAnalysis = async (analysis) => {
+    await saveProfile({ last_analysis: analysis, last_analysis_at: new Date().toISOString() })
+  }
+
+  return { profile, loading, reload: load, saveProfile, saveProgress, markComplete, saveAnalysis }
 }
 
 // Dados de saúde de um dia (entrada MANUAL -> health_daily).
