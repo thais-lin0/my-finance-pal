@@ -356,7 +356,20 @@ export function useDietaryProfile() {
     setProfile(next)
   }
 
-  return { profile, loading, reload: load, saveProfile }
+  // Salva o progresso PARCIAL do onboarding (um passo por vez) e grava o
+  // índice do passo pra retomada ("salvar e continuar depois"). Faz merge
+  // com o que já existe, então nunca apaga campos não incluídos no patch.
+  const saveProgress = async (patch, step) => {
+    const extra = typeof step === 'number' ? { onboarding_step: step } : {}
+    await saveProfile({ ...patch, ...extra })
+  }
+
+  // Marca o onboarding como concluído (carimba a data).
+  const markComplete = async (patch = {}) => {
+    await saveProfile({ ...patch, onboarding_completed_at: new Date().toISOString() })
+  }
+
+  return { profile, loading, reload: load, saveProfile, saveProgress, markComplete }
 }
 
 // Dados de saúde de um dia (entrada MANUAL -> health_daily).
