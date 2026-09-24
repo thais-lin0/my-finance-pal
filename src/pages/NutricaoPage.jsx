@@ -19,8 +19,8 @@ import {
   Settings,
   Flame,
   Footprints,
-  PanelRightClose,
-  PanelRightOpen,
+  Droplet,
+
 } from 'lucide-react'
 import { useWeek } from '../context/WeekContext'
 import { useAgenda } from '../hooks/useAgenda'
@@ -368,10 +368,11 @@ function DiarioTab({ pendingAction, consumeAction }) {
   const [goalsOpen, setGoalsOpen] = useState(false)
   const [goalsAiBusy, setGoalsAiBusy] = useState(false)
   const [goalsNote, setGoalsNote] = useState(null)
-  // Painel lateral de "Progresso do dia": aberto por padrão, alterna e persiste
-  // a preferência de UI no navegador (só visão, não é dado de domínio).
+  // "Progresso do dia": uma linha-resumo sempre visível; o detalhamento
+  // (macros, água, calorias gastas, passos, editor de metas) fica recolhido
+  // por padrão pra não pesar a tela. Persiste só a preferência de UI.
   const [progressOpen, setProgressOpen] = useState(
-    () => localStorage.getItem('mlp.diario.progress') !== 'closed'
+    () => localStorage.getItem('mlp.diario.progress') === 'open'
   )
   const toggleProgress = () =>
     setProgressOpen((o) => {
@@ -497,6 +498,31 @@ function DiarioTab({ pendingAction, consumeAction }) {
         onUndoWater={day.removeLastWater}
       />
 
+      {/* padrão de água: define o volume que o clique único no resumo adiciona
+          (ex: a garrafa dela = 1100 ml). Salva em nutrition_goals.water_step_ml. */}
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 dark:bg-sky-900/20">
+        <label className="flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+          <Droplet size={13} /> Meu padrão (1 clique no resumo)
+        </label>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={50}
+            step={50}
+            defaultValue={day.goals.water_step_ml ?? 500}
+            key={`waterstep-${day.goals.water_step_ml ?? 500}`}
+            onBlur={(e) => {
+              const v = Math.max(0, Number(e.target.value) || 0)
+              if (v && v !== (day.goals.water_step_ml ?? 500)) day.saveGoals({ water_step_ml: v })
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            className={`${inputCls} w-24 text-right`}
+          />
+          <span className="text-xs text-slate-400">ml</span>
+        </div>
+      </div>
+
       {/* atividade do dia: calorias gastas (das atividades concluídas na
           Agenda) + passos (manual). Só informativo — não mexe na meta de
           ingestão. */}
@@ -515,6 +541,31 @@ function DiarioTab({ pendingAction, consumeAction }) {
         </div>
 
         <StepsCard health={health} date={date} />
+      </div>
+
+      {/* padrão de passos: define quanto o clique único no resumo soma ao total
+          de passos do dia. Salva em nutrition_goals.steps_step. */}
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2 dark:bg-emerald-900/20">
+        <label className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+          <Footprints size={13} /> Passos por clique (no resumo)
+        </label>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={100}
+            step={100}
+            defaultValue={day.goals.steps_step ?? 1000}
+            key={`stepsstep-${day.goals.steps_step ?? 1000}`}
+            onBlur={(e) => {
+              const v = Math.max(0, Number(e.target.value) || 0)
+              if (v && v !== (day.goals.steps_step ?? 1000)) day.saveGoals({ steps_step: v })
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            className={`${inputCls} w-24 text-right`}
+          />
+          <span className="text-xs text-slate-400">passos</span>
+        </div>
       </div>
 
       {goalsOpen && (
@@ -567,6 +618,39 @@ function DiarioTab({ pendingAction, consumeAction }) {
     </>
   )
 
+  // Linha-resumo compacta do progresso (sempre visível): kcal consumidas x meta
+  // + água, calorias gastas e passos — cada um discreto. Clicar abre/fecha o
+  // detalhamento (e é lá que se edita/adiciona).
+  const kcalConsumed = Math.round(day.totals?.calories ?? 0)
+  const kcalGoal = day.goals?.calories ?? 0
+  const kcalPct = kcalGoal > 0 ? Math.min(100, (kcalConsumed / kcalGoal) * 100) : 0
+  const kcalOver = kcalGoal > 0 && kcalConsumed > kcalGoal
+
+  const waterTotal = day.waterTotal ?? 0
+  const waterGoal = day.goals?.water_ml_goal ?? 0
+  const waterStep = day.goals?.water_step_ml ?? 500
+  const burned = health.caloriesBurned
+  const steps = health.data?.steps ?? null
+  const stepsStep = day.goals?.steps_step ?? 1000
+
+  // Clique único no chip de água registra o tamanho padrão (garrafa/copo) sem
+  // abrir o painel. Feedback visual rápido de "+Nml adicionado".
+  const [waterFlash, setWaterFlash] = useState(false)
+  const quickAddWater = async () => {
+    await day.addWater(waterStep)
+    setWaterFlash(true)
+    setTimeout(() => setWaterFlash(false), 900)
+  }
+
+  // Clique único no chip de passos SOMA o padrão ao total do dia (passos é um
+  // valor absoluto, então somamos ao que já existe).
+  const [stepsFlash, setStepsFlash] = useState(false)
+  const quickAddSteps = async () => {
+    await health.saveSteps((steps ?? 0) + stepsStep)
+    setStepsFlash(true)
+    setTimeout(() => setStepsFlash(false), 900)
+  }
+
   // Botão "Metas" (abre/fecha o editor de metas dentro do painel).
   const metasToggle = (
     <button
@@ -584,190 +668,244 @@ function DiarioTab({ pendingAction, consumeAction }) {
   )
 
   return (
-    <div className="flex gap-6">
-      {/* coluna principal do diário */}
-      <div className="min-w-0 flex-1 space-y-6">
-        <GoalSummary />
+    <div className="space-y-6">
+      <GoalSummary />
 
-        {/* botão para reabrir o painel quando fechado (só desktop) */}
-        {!progressOpen && (
-          <div className="hidden justify-end lg:flex">
+      {/* entrada de refeição */}
+      <div className={card}>
+        <div className="mb-3 flex items-center justify-between">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+          <span className="text-xs text-slate-400">{formatDateBR(date)}</span>
+        </div>
+
+        {/* seletor visual de refeição */}
+        <div className="mb-3 flex flex-wrap gap-2">
+          {MEALS.map((m) => {
+            const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
+            return (
+              <button
+                key={m}
+                onClick={() => setMeal(m)}
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  meal === m
+                    ? 'bg-brand-500 text-white shadow-card'
+                    : 'border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-400 dark:hover:bg-ink-800'
+                }`}
+              >
+                <Icon size={15} /> {m}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* entrada por IA */}
+        <div className="rounded-xl border border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-900/20">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300">
+            <Sparkles size={13} /> Descreva o que comeu em {meal}
+          </label>
+          <div className="mt-2 flex gap-2">
+            <input
+              className={`${inputCls} flex-1`}
+              placeholder="Ex: 100g de arroz, 60g de legumes, 130g de alcatra no shoyo e 60g de lentilha"
+              value={aiText}
+              onChange={(e) => setAiText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && parseWithAI()}
+            />
             <button
-              onClick={toggleProgress}
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-500 shadow-card transition hover:border-brand-400 hover:text-brand-600 dark:border-ink-700 dark:bg-ink-900 dark:text-slate-400"
-              title="Mostrar progresso do dia"
+              onClick={parseWithAI}
+              disabled={aiBusy}
+              className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60"
             >
-              <PanelRightOpen size={16} /> Progresso do dia
+              {aiBusy ? '…' : 'Adicionar'}
             </button>
           </div>
-        )}
-
-        {/* entrada de refeição */}
-        <div className={card}>
-          <div className="mb-3 flex items-center justify-between">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
-            <span className="text-xs text-slate-400">{formatDateBR(date)}</span>
-          </div>
-
-          {/* seletor visual de refeição */}
-          <div className="mb-3 flex flex-wrap gap-2">
-            {MEALS.map((m) => {
-              const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
-              return (
-                <button
-                  key={m}
-                  onClick={() => setMeal(m)}
-                  className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                    meal === m
-                      ? 'bg-brand-500 text-white shadow-card'
-                      : 'border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-400 dark:hover:bg-ink-800'
-                  }`}
-                >
-                  <Icon size={15} /> {m}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* entrada por IA */}
-          <div className="rounded-xl border border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-900/20">
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300">
-              <Sparkles size={13} /> Descreva o que comeu em {meal}
-            </label>
-            <div className="mt-2 flex gap-2">
-              <input
-                className={`${inputCls} flex-1`}
-                placeholder="Ex: 100g de arroz, 60g de legumes, 130g de alcatra no shoyo e 60g de lentilha"
-                value={aiText}
-                onChange={(e) => setAiText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && parseWithAI()}
-              />
-              <button
-                onClick={parseWithAI}
-                disabled={aiBusy}
-                className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60"
-              >
-                {aiBusy ? '…' : 'Adicionar'}
-              </button>
-            </div>
-            {aiNote && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{aiNote}</p>}
-          </div>
-        </div>
-
-        {/* progresso do dia (mobile): inline, sempre visível, sem sticky */}
-        <div className={`${card} lg:hidden`}>
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</h3>
-            {metasToggle}
-          </div>
-          {progressBody}
-        </div>
-
-        {/* refeições do dia — cada uma com sua meta de calorias (fatia da meta
-            diária) e barra de progresso própria; grade responsiva */}
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Refeições do dia
-            </h3>
-            <span className="text-xs text-slate-400">meta de cada refeição = fatia da meta diária</span>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {MEALS.map((m) => {
-              const rows = day.byMeal[m] ?? []
-              const consumed = Math.round(day.mealTotals[m] ?? 0)
-              const target = day.mealGoals[m] ?? 0
-              const over = target > 0 && consumed > target
-              const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
-              const active = meal === m
-              return (
-                <div
-                  key={m}
-                  className={`${card} flex flex-col ${active ? 'ring-2 ring-brand-400 dark:ring-brand-500' : ''}`}
-                >
-                  {/* cabeçalho clicável: seleciona a refeição pro campo de IA acima */}
-                  <button
-                    onClick={() => setMeal(m)}
-                    title={`Lançar em ${m}`}
-                    className="mb-2 flex items-center justify-between text-left"
-                  >
-                    <span className="flex items-center gap-2 font-display font-bold text-slate-800 dark:text-slate-100">
-                      <Icon size={16} className="text-slate-400" /> {m}
-                    </span>
-                    <span className={`tnum text-sm font-semibold ${over ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
-                      {consumed}
-                      <span className="text-slate-400"> / {target || '—'} kcal</span>
-                    </span>
-                  </button>
-
-                  {/* barra de progresso da refeição */}
-                  <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
-                    <div
-                      className={`h-full rounded-full transition-all ${over ? 'bg-coral' : MEAL_ACCENT[m] ?? 'bg-brand-500'}`}
-                      style={{ width: `${target > 0 ? Math.min(100, (consumed / target) * 100) : 0}%` }}
-                    />
-                  </div>
-                  {over && (
-                    <p className="-mt-2 mb-2 text-[11px] font-medium text-coral">
-                      {consumed - target} kcal acima da meta desta refeição
-                    </p>
-                  )}
-
-                  {/* entradas da refeição */}
-                  {rows.length ? (
-                    <ul className="flex-1 divide-y divide-slate-100 dark:divide-ink-800/60">
-                      {rows.map((l) => (
-                        <li key={l.id} className="flex items-center justify-between py-2 text-sm">
-                          <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{l.description}</span>
-                          <div className="ml-2 flex shrink-0 items-center gap-2">
-                            <span className="tnum text-xs text-slate-400">
-                              {Math.round(Number(l.calories))} kcal
-                            </span>
-                            <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <button
-                      onClick={() => setMeal(m)}
-                      className="flex-1 rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 transition hover:border-brand-300 hover:text-brand-500 dark:border-ink-700 dark:hover:border-brand-700"
-                    >
-                      Nada lançado — clique e descreva o que comeu acima
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+          {aiNote && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{aiNote}</p>}
         </div>
       </div>
 
-      {/* painel lateral direito: Progresso do dia — trava na viewport, abre/fecha */}
-      {progressOpen && (
-        <aside className="hidden w-80 shrink-0 lg:block">
-          <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto">
-            <div className={card}>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</h3>
-                <div className="flex items-center gap-1">
-                  {metasToggle}
-                  <button
-                    onClick={toggleProgress}
-                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-ink-800"
-                    title="Recolher painel"
-                  >
-                    <PanelRightClose size={16} />
-                  </button>
-                </div>
-              </div>
-              {progressBody}
+      {/* progresso do dia — linha-resumo sempre visível; detalhe recolhível */}
+      <div className={card}>
+        <button
+          onClick={toggleProgress}
+          aria-expanded={progressOpen}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <span className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</span>
+          <div className="flex-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Calorias</span>
+              <span className={`tnum font-semibold ${kcalOver ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
+                {kcalConsumed}<span className="text-slate-400"> / {kcalGoal || '—'} kcal</span>
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
+              <div
+                className={`h-full rounded-full transition-all ${kcalOver ? 'bg-coral' : 'bg-brand-500'}`}
+                style={{ width: `${kcalPct}%` }}
+              />
             </div>
           </div>
-        </aside>
-      )}
+          <ChevronDown
+            size={18}
+            className={`shrink-0 text-slate-400 transition-transform ${progressOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {/* mini-resumo: água (clique = adiciona o padrão), calorias gastas e
+            passos (clique = abre o detalhe) */}
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button
+            onClick={quickAddWater}
+            title={`Adicionar ${waterStep} ml de água`}
+            className={`group flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition ${
+              waterFlash
+                ? 'bg-sky-500 text-white'
+                : 'bg-sky-50 hover:bg-sky-100 dark:bg-sky-900/20 dark:hover:bg-sky-900/40'
+            }`}
+          >
+            <Droplet size={13} className={`shrink-0 ${waterFlash ? 'text-white' : 'text-sky-500'}`} />
+            <span className="min-w-0 text-xs">
+              {waterFlash ? (
+                <span className="font-semibold">+{waterStep} ml</span>
+              ) : (
+                <>
+                  <span className="tnum font-semibold text-slate-700 dark:text-slate-200">
+                    {(waterTotal / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}
+                  </span>
+                  <span className="text-slate-400"> / {waterGoal ? (waterGoal / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '—'} L</span>
+                </>
+              )}
+            </span>
+          </button>
+          <button
+            onClick={toggleProgress}
+            aria-expanded={progressOpen}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-left dark:bg-ink-800/60"
+          >
+            <Flame size={13} className="shrink-0 text-orange-500" />
+            <span className="min-w-0 text-xs">
+              <span className="tnum font-semibold text-slate-700 dark:text-slate-200">
+                {burned != null ? burned : '—'}
+              </span>
+              <span className="text-slate-400"> kcal</span>
+            </span>
+          </button>
+          <button
+            onClick={quickAddSteps}
+            title={`Adicionar ${stepsStep.toLocaleString('pt-BR')} passos`}
+            className={`group flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition ${
+              stepsFlash
+                ? 'bg-emerald-500 text-white'
+                : 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40'
+            }`}
+          >
+            <Footprints size={13} className={`shrink-0 ${stepsFlash ? 'text-white' : 'text-emerald-500'}`} />
+            <span className="min-w-0 text-xs">
+              {stepsFlash ? (
+                <span className="font-semibold">+{stepsStep.toLocaleString('pt-BR')}</span>
+              ) : (
+                <>
+                  <span className="tnum font-semibold text-slate-700 dark:text-slate-200">
+                    {steps != null ? steps.toLocaleString('pt-BR') : '—'}
+                  </span>
+                  <span className="text-slate-400"> passos</span>
+                </>
+              )}
+            </span>
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-400">
+          Toque na gota (+{(waterStep / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L) ou nos passos (+{stepsStep.toLocaleString('pt-BR')}) pra somar · abra o painel pra mudar os padrões
+        </p>
+
+        {progressOpen && (
+          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-ink-800">
+            <div className="mb-3 flex justify-end">{metasToggle}</div>
+            {progressBody}
+          </div>
+        )}
+      </div>
+
+      {/* refeições do dia — cada uma com sua meta de calorias (fatia da meta
+          diária) e barra de progresso própria; grade responsiva */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Refeições do dia
+          </h3>
+          <span className="text-xs text-slate-400">meta de cada refeição = fatia da meta diária</span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {MEALS.map((m) => {
+            const rows = day.byMeal[m] ?? []
+            const consumed = Math.round(day.mealTotals[m] ?? 0)
+            const target = day.mealGoals[m] ?? 0
+            const over = target > 0 && consumed > target
+            const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
+            const active = meal === m
+            return (
+              <div
+                key={m}
+                className={`${card} flex flex-col ${active ? 'ring-2 ring-brand-400 dark:ring-brand-500' : ''}`}
+              >
+                {/* cabeçalho clicável: seleciona a refeição pro campo de IA acima */}
+                <button
+                  onClick={() => setMeal(m)}
+                  title={`Lançar em ${m}`}
+                  className="mb-2 flex items-center justify-between text-left"
+                >
+                  <span className="flex items-center gap-2 font-display font-bold text-slate-800 dark:text-slate-100">
+                    <Icon size={16} className="text-slate-400" /> {m}
+                  </span>
+                  <span className={`tnum text-sm font-semibold ${over ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
+                    {consumed}
+                    <span className="text-slate-400"> / {target || '—'} kcal</span>
+                  </span>
+                </button>
+
+                {/* barra de progresso da refeição */}
+                <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
+                  <div
+                    className={`h-full rounded-full transition-all ${over ? 'bg-coral' : MEAL_ACCENT[m] ?? 'bg-brand-500'}`}
+                    style={{ width: `${target > 0 ? Math.min(100, (consumed / target) * 100) : 0}%` }}
+                  />
+                </div>
+                {over && (
+                  <p className="-mt-2 mb-2 text-[11px] font-medium text-coral">
+                    {consumed - target} kcal acima da meta desta refeição
+                  </p>
+                )}
+
+                {/* entradas da refeição */}
+                {rows.length ? (
+                  <ul className="flex-1 divide-y divide-slate-100 dark:divide-ink-800/60">
+                    {rows.map((l) => (
+                      <li key={l.id} className="flex items-center justify-between py-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{l.description}</span>
+                        <div className="ml-2 flex shrink-0 items-center gap-2">
+                          <span className="tnum text-xs text-slate-400">
+                            {Math.round(Number(l.calories))} kcal
+                          </span>
+                          <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <button
+                    onClick={() => setMeal(m)}
+                    className="flex-1 rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 transition hover:border-brand-300 hover:text-brand-500 dark:border-ink-700 dark:hover:border-brand-700"
+                  >
+                    Nada lançado — clique e descreva o que comeu acima
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

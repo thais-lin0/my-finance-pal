@@ -8,7 +8,7 @@ export const SHOPPING_CATEGORIES = ['Hortifruti', 'Proteínas', 'Laticínios', '
 
 // Distribuição padrão da meta diária de calorias entre as refeições (%).
 export const DEFAULT_MEAL_SPLIT = { 'Café': 25, 'Almoço': 35, 'Lanche': 10, 'Jantar': 25, 'Ceia': 5 }
-const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000, meal_split: DEFAULT_MEAL_SPLIT, weekly_calories: {} }
+const DEFAULT_GOALS = { calories: 2000, protein_g: 120, carbs_g: 200, fat_g: 60, goal_type: 'manutencao', water_ml_goal: 2000, water_step_ml: 500, steps_step: 1000, meal_split: DEFAULT_MEAL_SPLIT, weekly_calories: {} }
 
 // Nomes dos dias na ordem 0=Segunda … 6=Domingo (usada em weekly_calories).
 export const WEEKDAY_LABELS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
@@ -40,7 +40,7 @@ export function useNutritionDay(logDate) {
     ])
     if (logRes.error) setError(logRes.error.message)
     setLogs(logRes.data ?? [])
-    if (goalRes.data) setGoals(goalRes.data)
+    if (goalRes.data) setGoals({ ...DEFAULT_GOALS, ...goalRes.data })
     setWater(waterRes.data ?? [])
     setLoading(false)
   }, [user, logDate])
