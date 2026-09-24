@@ -8,9 +8,12 @@
 //  payload de exemplo (mock) para o front funcionar.
 //
 //  Todas as ações aceitam opcionalmente `profile` (o perfil alimentar da
-//  aba Configurações — dietary_profile: diet_style, restrictions, dislikes,
-//  preferred_carbs, preferred_proteins, preferred_breakfast, variety_level,
-//  notes), usado por buildProfileText() pra personalizar o prompt por usuário.
+//  aba Preferências — dietary_profile). buildProfileText() incorpora a
+//  anamnese completa (blocos A–H): objetivo, antropometria, histórico
+//  clínico/esportivo, rotina de treino, nutrição atual, viabilidade,
+//  referências de TMB/TDEE e insumos — ignorando campos marcados como
+//  lacuna ("__lacuna__"). Sem perfil, a IA usa um padrão brasileiro
+//  equilibrado.
 //
 //  Ações suportadas (body.action):
 //   - "parse_food"   { text, profile? }                              -> { items: [{description, calories, protein_g, carbs_g, fat_g}] }
@@ -61,18 +64,123 @@ const VARIETY_LABELS = {
 // Converte o perfil alimentar (anamnese em Configurações) num parágrafo de
 // preferências que entra no conteúdo enviado à IA. Sem perfil preenchido,
 // retorna vazio e a IA usa um padrão brasileiro genérico e equilibrado.
+// Incorpora os blocos A–H do onboarding completo quando presentes.
 function buildProfileText(profile) {
   if (!profile) return ''
-  const lines = []
-  if (profile.diet_style && DIET_STYLE_LABELS[profile.diet_style]) lines.push(`Estilo alimentar: ${DIET_STYLE_LABELS[profile.diet_style]}.`)
-  if (profile.restrictions) lines.push(`Restrições/alergias (respeite sempre): ${profile.restrictions}.`)
-  if (profile.dislikes) lines.push(`Não gosta / evitar: ${profile.dislikes}.`)
-  if (profile.preferred_carbs) lines.push(`Carboidratos preferidos: ${profile.preferred_carbs}.`)
-  if (profile.preferred_proteins) lines.push(`Proteínas preferidas: ${profile.preferred_proteins}.`)
-  if (profile.preferred_breakfast) lines.push(`Café da manhã preferido: ${profile.preferred_breakfast}.`)
-  if (profile.variety_level && VARIETY_LABELS[profile.variety_level]) lines.push(`Variedade: a pessoa ${VARIETY_LABELS[profile.variety_level]}.`)
-  if (profile.notes) lines.push(`Observações da pessoa: ${profile.notes}.`)
-  return lines.length ? `\n\nPreferências do usuário (siga estritamente quando fizer sentido):\n${lines.join('\n')}` : ''
+
+  const LACUNA = '__lacuna__'
+  // Valor "usável": não nulo/vazio e não marcado como lacuna ("não sei/não tenho").
+  const has = (v) => v != null && v !== '' && v !== LACUNA
+  // Lê um campo jsonb com segurança (pode vir como objeto ou null).
+  const j = (obj, key) => (obj && typeof obj === 'object' ? obj[key] : undefined)
+
+  const GOAL_LABELS = {
+    hipertrofia: 'hipertrofia (ganho de massa muscular)',
+    perda_gordura: 'perda de gordura',
+    recomposicao: 'recomposição corporal',
+    desempenho: 'desempenho esportivo',
+    saude: 'saúde / manutenção',
+  }
+
+  // ── Bloco F/antigo: preferências alimentares (base do cardápio) ──
+  const prefs = []
+  if (profile.diet_style && DIET_STYLE_LABELS[profile.diet_style]) prefs.push(`Estilo alimentar: ${DIET_STYLE_LABELS[profile.diet_style]}.`)
+  if (has(profile.restrictions)) prefs.push(`Restrições/alergias (respeite SEMPRE): ${profile.restrictions}.`)
+  if (has(profile.dislikes)) prefs.push(`Não gosta / evitar: ${profile.dislikes}.`)
+  if (has(profile.preferred_carbs)) prefs.push(`Carboidratos preferidos: ${profile.preferred_carbs}.`)
+  if (has(profile.preferred_proteins)) prefs.push(`Proteínas preferidas: ${profile.preferred_proteins}.`)
+  if (has(profile.preferred_breakfast)) prefs.push(`Café da manhã preferido: ${profile.preferred_breakfast}.`)
+  if (profile.variety_level && VARIETY_LABELS[profile.variety_level]) prefs.push(`Variedade: a pessoa ${VARIETY_LABELS[profile.variety_level]}.`)
+  if (has(profile.meals_per_day)) prefs.push(`Número de refeições por dia: ${profile.meals_per_day}.`)
+
+  // ── Bloco C: objetivo ──
+  const goal = []
+  if (has(profile.goal_primary)) goal.push(`Objetivo principal: ${GOAL_LABELS[profile.goal_primary] ?? profile.goal_primary}.`)
+  if (has(profile.goal_constraints)) goal.push(`Restrições estéticas/de conforto: ${profile.goal_constraints}.`)
+  if (has(profile.goal_deadline)) goal.push(`Prazo / evento-alvo: ${profile.goal_deadline}.`)
+  if (has(profile.goal_target)) goal.push(`Meta de peso/composição: ${profile.goal_target}.`)
+
+  // ── Bloco A: antropometria ──
+  const anthro = []
+  if (has(profile.sex)) anthro.push(`Sexo biológico: ${profile.sex}.`)
+  if (has(profile.age)) anthro.push(`Idade: ${profile.age} anos.`)
+  if (has(profile.height_cm)) anthro.push(`Altura: ${profile.height_cm} cm.`)
+  if (has(profile.weight_kg)) anthro.push(`Peso atual: ${profile.weight_kg} kg.`)
+  if (has(profile.body_fat_pct)) anthro.push(`% de gordura: ${profile.body_fat_pct}%${has(profile.body_fat_method) ? ` (medido por ${profile.body_fat_method})` : ''}.`)
+  if (has(profile.weight_trend)) anthro.push(`Tendência de peso (12 meses): ${profile.weight_trend}.`)
+  if (has(profile.waist_cm)) anthro.push(`Circunferência de cintura: ${profile.waist_cm} cm.`)
+
+  // ── Bloco B: histórico clínico/esportivo (jsonb) ──
+  const hist = []
+  if (has(j(profile.history, 'family'))) hist.push(`Histórico familiar: ${profile.history.family}.`)
+  if (has(j(profile.history, 'personal'))) hist.push(`Condições atuais: ${profile.history.personal}.`)
+  if (has(j(profile.history, 'medications'))) hist.push(`Medicamentos/suplementos em uso: ${profile.history.medications}.`)
+  if (has(j(profile.history, 'ed'))) hist.push(`Histórico alimentar sensível (transtorno/dieta restritiva/sanfona): ${profile.history.ed} — EVITE contagem rígida e prescrições muito restritivas.`)
+  if (has(j(profile.history, 'sports'))) hist.push(`Histórico esportivo: ${profile.history.sports}.`)
+  if (has(j(profile.history, 'strength_years'))) hist.push(`Anos de treino de força consistente: ${profile.history.strength_years} (define o teto realista de ganho).`)
+  if (has(j(profile.history, 'pregnancy'))) hist.push(`Gestação/pós-parto/amamentação: ${profile.history.pregnancy}.`)
+
+  // ── Bloco D: rotina esportiva (jsonb) ──
+  const sport = []
+  if (has(j(profile.sport_routine, 'weekly'))) sport.push(`Rotina semanal de treino: ${profile.sport_routine.weekly}.`)
+  if (has(j(profile.sport_routine, 'optional'))) sport.push(`Sessões opcionais/variáveis: ${profile.sport_routine.optional} (tratar como módulo aditivo, não dia fixo).`)
+  if (has(j(profile.sport_routine, 'strength'))) sport.push(`Treino de força (séries/progressão): ${profile.sport_routine.strength}.`)
+  if (has(j(profile.sport_routine, 'neat'))) sport.push(`Atividade fora do treino (NEAT): ${profile.sport_routine.neat}.`)
+  if (has(j(profile.sport_routine, 'sleep'))) sport.push(`Sono: ${profile.sport_routine.sleep}.`)
+
+  // ── Bloco E: nutrição atual (jsonb) ──
+  const nutri = []
+  if (has(j(profile.current_nutrition, 'typical'))) nutri.push(`Dia alimentar típico atual: ${profile.current_nutrition.typical}.`)
+  if (has(j(profile.current_nutrition, 'windows'))) nutri.push(`Janelas de horário das refeições: ${profile.current_nutrition.windows}.`)
+  if (has(j(profile.current_nutrition, 'calories'))) nutri.push(`Ingestão calórica atual estimada: ${profile.current_nutrition.calories}.`)
+  if (has(j(profile.current_nutrition, 'drinks'))) nutri.push(`Álcool/cafeína/água: ${profile.current_nutrition.drinks}.`)
+  if (has(j(profile.current_nutrition, 'supplements'))) nutri.push(`Suplementos atuais: ${profile.current_nutrition.supplements}.`)
+
+  // ── Bloco F: viabilidade ──
+  const viab = []
+  if (has(profile.cooking_time)) viab.push(`Tempo/habilidade pra cozinhar: ${profile.cooking_time}.`)
+  if (has(profile.eats_out)) viab.push(`Come fora: ${profile.eats_out}.`)
+  if (profile.has_work_kitchen === true) viab.push('Tem cozinha/geladeira no trabalho.')
+  else if (profile.has_work_kitchen === false) viab.push('NÃO tem cozinha/geladeira no trabalho (considere refeições práticas/transportáveis).')
+  if (has(profile.budget)) viab.push(`Orçamento para alimentação/suplementos: ${profile.budget}.`)
+
+  // ── Bloco G: referência de TMB/TDEE ──
+  const ref = []
+  if (has(profile.ref_tmb_tdee)) ref.push(`TMB/TDEE de referência trazido pela pessoa: ${profile.ref_tmb_tdee} — recalcule por conta própria e confronte, não aceite como verdade nem descarte sem explicar.`)
+
+  // ── Bloco H: insumos disponíveis ──
+  const inputLabels = {
+    prev_plan: 'plano alimentar anterior',
+    watch: 'export de relógio/app de atividade',
+    labs: 'exames laboratoriais',
+    calorie_app: 'export de app de contagem de calorias',
+    body_assessment: 'avaliação física/bioimpedância',
+  }
+  const inputs = Object.entries(inputLabels)
+    .filter(([k]) => j(profile.inputs_available, k))
+    .map(([, label]) => label)
+
+  if (has(profile.notes)) prefs.push(`Observações da pessoa: ${profile.notes}.`)
+
+  // Monta o parágrafo por seções, só com o que tem conteúdo.
+  const sections = [
+    ['OBJETIVO', goal],
+    ['ANTROPOMETRIA', anthro],
+    ['HISTÓRICO CLÍNICO/ESPORTIVO', hist],
+    ['ROTINA ESPORTIVA', sport],
+    ['NUTRIÇÃO ATUAL', nutri],
+    ['VIABILIDADE (respeite ao montar cardápio)', viab],
+    ['PREFERÊNCIAS ALIMENTARES (siga estritamente)', prefs],
+    ['REFERÊNCIAS', ref],
+  ]
+  const blocks = sections
+    .filter(([, arr]) => arr.length)
+    .map(([title, arr]) => `${title}:\n${arr.map((l) => `- ${l}`).join('\n')}`)
+
+  if (inputs.length) blocks.push(`INSUMOS QUE A PESSOA DISSE TER: ${inputs.join(', ')}.`)
+
+  if (!blocks.length) return ''
+  return `\n\nPERFIL DO USUÁRIO (anamnese — use tudo que for relevante para individualizar; NÃO invente dados ausentes):\n\n${blocks.join('\n\n')}`
 }
 
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
@@ -387,8 +495,10 @@ async function invokeOpenRouter(action, payload) {
       const bioText = `Idade: ${age ?? '?'} anos. Peso atual: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ${activityText} ${goalText}`
       const json = await chatJSON(
         'Você é um nutricionista esportivo. Com base em idade, peso, altura, nível de atividade física semanal e no OBJETIVO de peso informados, ' +
-          'estime o gasto calórico diário (TDEE) e proponha uma meta diária de calorias e macronutrientes alinhada a esse objetivo ' +
-          '(sexo biológico não foi informado; use uma estimativa média razoável). Se houver restrições/estilo alimentar informados, ' +
+          'estime o gasto calórico diário (TDEE) e proponha uma meta diária de calorias e macronutrientes alinhada a esse objetivo. ' +
+          'Se o sexo biológico constar no PERFIL DO USUÁRIO abaixo, use-o na equação de metabolismo; se não constar, use uma estimativa média razoável. ' +
+          'Prefira os dados de antropometria do PERFIL (sexo, idade, altura, peso, % de gordura, tendência de peso) quando presentes, complementando os valores acima. ' +
+          'Se houver restrições/estilo alimentar informados, ' +
           'considere-os ao pensar nas fontes de proteína/carboidrato implícitas nos macros. ' +
           'Além disso, estime uma meta diária de consumo de ÁGUA em ml, usando como base ~35ml por kg de peso corporal, ' +
           'ajustada pra cima conforme o nível de atividade física semanal (mais treino = mais água). ' +

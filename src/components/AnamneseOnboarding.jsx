@@ -9,8 +9,13 @@ import {
   Zap,
   Pencil,
   CircleHelp,
+  CalendarRange,
+  UtensilsCrossed,
+  Target,
+  PartyPopper,
 } from 'lucide-react'
 import { useDietaryProfile } from '../hooks/useNutrition'
+import NextSteps from './NextSteps'
 
 // ─────────────────────────────────────────────────────────────────────
 //  Onboarding da anamnese nutricional.
@@ -162,13 +167,14 @@ function GapField({ label, value, onChange, placeholder, optional, textarea, typ
   )
 }
 
-export default function AnamneseOnboarding() {
+export default function AnamneseOnboarding({ onNavigate }) {
   const { profile, loading, saveProgress, markComplete } = useDietaryProfile()
   const [form, setForm] = useState(null)
   const [step, setStep] = useState(0)
   const [savedAt, setSavedAt] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [justFinished, setJustFinished] = useState(false)
 
   const completed = !!profile?.onboarding_completed_at
 
@@ -193,9 +199,16 @@ export default function AnamneseOnboarding() {
     return <ModePicker onPick={(mode) => { set({ onboarding_mode: mode }); setStep(0); saveProgress({ onboarding_mode: mode }, 0) }} />
   }
 
-  // ── Concluído e não editando: resumo + botão editar ──
+  // ── Concluído e não editando: celebração (se acabou agora) ou resumo, ambos com próximos passos ──
   if (completed && !editing) {
-    return <Summary profile={profile} onEdit={() => { setEditing(true); setStep(0) }} />
+    return (
+      <Summary
+        profile={profile}
+        celebrate={justFinished}
+        onNavigate={onNavigate}
+        onEdit={() => { setEditing(true); setJustFinished(false); setStep(0) }}
+      />
+    )
   }
 
   const total = steps.length
@@ -223,6 +236,7 @@ export default function AnamneseOnboarding() {
       try {
         await markComplete(clean(form))
         setEditing(false)
+        setJustFinished(true)
       } finally {
         setSaving(false)
       }
@@ -358,8 +372,8 @@ function ModePicker({ onPick }) {
   )
 }
 
-// ── Resumo pós-conclusão ─────────────────────────────────────────────
-function Summary({ profile, onEdit }) {
+// ── Conclusão: celebração (recém-concluído) ou resumo, sempre com próximos passos ──
+function Summary({ profile, onEdit, onNavigate, celebrate }) {
   const rows = [
     ['Objetivo', labelForGoal(profile.goal_primary)],
     ['Estilo alimentar', labelForDiet(profile.diet_style)],
@@ -370,21 +384,74 @@ function Summary({ profile, onEdit }) {
     ['Altura / peso', [profile.height_cm && `${profile.height_cm} cm`, profile.weight_kg && `${profile.weight_kg} kg`].filter(Boolean).join(' · ')],
   ].filter(([, v]) => v != null && v !== '')
 
-  return (
-    <div className="space-y-4">
-      <div className={`${card} border border-money/30 bg-money/5`}>
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-money">
-          <Check size={15} /> Perfil preenchido
-          <span className="font-normal text-slate-500 dark:text-slate-400">
-            · modo {profile.onboarding_mode === 'completo' ? 'completo' : 'básico'}
-          </span>
-        </p>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          A IA já está usando esses dados. Você pode revisar ou aprofundar a qualquer momento.
-        </p>
-      </div>
+  const go = (tab, opts) => onNavigate?.(tab, opts)
 
+  const steps = [
+    {
+      icon: CalendarRange,
+      title: 'Gerar meu cardápio da semana',
+      description: 'A IA já tem seu perfil — monta o cardápio dos 7 dias na hora.',
+      cta: 'Gerar agora',
+      tone: 'brand',
+      onClick: () => go('cardapio', { autoGeneratePlan: true }),
+    },
+    {
+      icon: UtensilsCrossed,
+      title: 'Registrar minha primeira refeição',
+      description: 'Descreva o que comeu e a IA calcula as calorias e macros.',
+      cta: 'Abrir Diário',
+      tone: 'brand',
+      onClick: () => go('diario'),
+    },
+    {
+      icon: Target,
+      title: 'Calcular minhas metas do dia',
+      description: 'Calorias e macros personalizados a partir do seu perfil.',
+      cta: 'Ver metas',
+      tone: 'brand',
+      onClick: () => go('diario', { openGoals: true }),
+    },
+  ]
+
+  return (
+    <div className="space-y-5">
+      {celebrate ? (
+        <div className={`${card} border-2 border-money/30 bg-money/5 text-center`}>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-money/15 text-money">
+            <PartyPopper size={28} />
+          </div>
+          <p className="mt-3 font-display text-xl font-bold text-slate-900 dark:text-white">
+            Perfil pronto! 🎉
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500 dark:text-slate-400">
+            A IA já está usando seus dados para personalizar tudo. Escolha por onde começar —
+            é só um clique.
+          </p>
+        </div>
+      ) : (
+        <div className={`${card} border border-money/30 bg-money/5`}>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-money">
+            <Check size={15} /> Perfil preenchido
+            <span className="font-normal text-slate-500 dark:text-slate-400">
+              · modo {profile.onboarding_mode === 'completo' ? 'completo' : 'básico'}
+            </span>
+          </p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            A IA já está usando esses dados. Comece por um dos passos abaixo ou revise seu perfil.
+          </p>
+        </div>
+      )}
+
+      {/* Próximos passos — o "e agora?" resolvido */}
+      <NextSteps
+        title="O que fazer agora"
+        subtitle="Seu perfil alimenta cada uma destas ações."
+        steps={steps}
+      />
+
+      {/* Resumo do perfil */}
       <div className={`${card} space-y-2`}>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Seu perfil</p>
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4 border-b border-slate-50 py-1.5 text-sm last:border-0 dark:border-ink-800">
             <span className="text-slate-500 dark:text-slate-400">{k}</span>
@@ -396,7 +463,7 @@ function Summary({ profile, onEdit }) {
       <button
         type="button"
         onClick={onEdit}
-        className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:border-ink-700 dark:text-slate-300 dark:hover:bg-ink-800"
       >
         <Pencil size={15} /> Editar / aprofundar perfil
       </button>

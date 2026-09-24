@@ -56,8 +56,19 @@ const card = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-card dark:
 
 export default function NutricaoPage() {
   const [tab, setTab] = useState('diario')
+  // Ação pendente disparada por um "próximo passo" do onboarding (ex: gerar
+  // cardápio na hora, ou abrir o painel de metas). O tab de destino consome
+  // e limpa. { autoGeneratePlan?: bool, openGoals?: bool }
+  const [pendingAction, setPendingAction] = useState(null)
   const dietary = useDietaryProfile()
   const [checkedFirstAccess, setCheckedFirstAccess] = useState(false)
+
+  // Navega para uma aba e registra a ação a ser executada ao montar.
+  const navigateWithAction = (targetTab, opts = null) => {
+    if (opts) setPendingAction(opts)
+    setTab(targetTab)
+  }
+  const consumeAction = () => setPendingAction(null)
   // Onboarding concluído? Um perfil parcial (salvo no meio do wizard) já
   // cria a linha, então o sinal certo é a data de conclusão, não a mera
   // existência da linha.
@@ -99,10 +110,10 @@ export default function NutricaoPage() {
         ))}
       </div>
 
-      {tab === 'diario' && <DiarioTab />}
-      {tab === 'cardapio' && <CardapioTab />}
+      {tab === 'diario' && <DiarioTab pendingAction={pendingAction} consumeAction={consumeAction} />}
+      {tab === 'cardapio' && <CardapioTab pendingAction={pendingAction} consumeAction={consumeAction} />}
       {tab === 'medidas' && <MedidasTab />}
-      {tab === 'preferencias' && <PreferenciasTab />}
+      {tab === 'preferencias' && <PreferenciasTab onNavigate={navigateWithAction} />}
     </div>
   )
 }
@@ -339,7 +350,7 @@ function StepsCard({ health, date }) {
   )
 }
 
-function DiarioTab() {
+function DiarioTab({ pendingAction, consumeAction }) {
   const [date, setDate] = useState(todayKey())
   const day = useNutritionDay(date)
   const health = useHealthDay(date)
@@ -359,6 +370,15 @@ function DiarioTab() {
   // quanto o preenchimento vindo da IA, sem salvar a cada tecla digitada
   const [macroForm, setMacroForm] = useState(day.goals)
   useEffect(() => setMacroForm(day.goals), [day.goals])
+
+  // Chegou pelo "próximo passo" do onboarding (Calcular metas): abre o painel
+  // de metas e rola até ele. Roda uma vez e limpa a ação pendente.
+  useEffect(() => {
+    if (!pendingAction?.openGoals) return
+    consumeAction?.()
+    setGoalsOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction])
 
   // Gera as metas de calorias/macros pela IA a partir de idade, peso, altura
   // e do OBJETIVO definido em Medidas (peso-alvo/data-alvo — emagrecer, manter
@@ -686,7 +706,7 @@ function DiarioTab() {
 // ────────────────── CARDÁPIO & COMPRAS ──────────────────
 // As duas ficam na mesma tela porque a lista de compras é gerada a partir
 // do cardápio da semana (a IA lê os pratos planejados pra montar os itens).
-function CardapioTab() {
+function CardapioTab({ pendingAction, consumeAction }) {
   const { weekStart, prevWeek, nextWeek } = useWeek()
   const plan = useMealPlan(weekStart)
   const day = useNutritionDay(todayKey())
@@ -716,6 +736,16 @@ function CardapioTab() {
       setPlanAiBusy(false)
     }
   }
+
+  // Auto-dispara a geração do cardápio quando o usuário chega aqui pelo
+  // "próximo passo" do onboarding (Gerar meu cardápio). Roda uma vez e
+  // limpa a ação pendente. Guard evita disparo duplo no StrictMode.
+  useEffect(() => {
+    if (!pendingAction?.autoGeneratePlan) return
+    consumeAction?.()
+    genPlanWithAI()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction])
 
   const clearPlan = async () => {
     if (!confirm('Excluir todo o cardápio desta semana?')) return
@@ -1092,6 +1122,6 @@ function MedidasTab() {
 // A aba de Preferências agora é o onboarding da anamnese (wizard com
 // modos básico/completo, salvar-e-continuar e retomada). Toda a lógica
 // vive em AnamneseOnboarding — aqui é só o ponto de montagem.
-function PreferenciasTab() {
-  return <AnamneseOnboarding />
+function PreferenciasTab({ onNavigate }) {
+  return <AnamneseOnboarding onNavigate={onNavigate} />
 }
