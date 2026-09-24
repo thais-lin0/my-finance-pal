@@ -19,6 +19,8 @@ import {
   Settings,
   Flame,
   Footprints,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react'
 import { useWeek } from '../context/WeekContext'
 import { useAgenda } from '../hooks/useAgenda'
@@ -366,6 +368,17 @@ function DiarioTab({ pendingAction, consumeAction }) {
   const [goalsOpen, setGoalsOpen] = useState(false)
   const [goalsAiBusy, setGoalsAiBusy] = useState(false)
   const [goalsNote, setGoalsNote] = useState(null)
+  // Painel lateral de "Progresso do dia": aberto por padrão, alterna e persiste
+  // a preferência de UI no navegador (só visão, não é dado de domínio).
+  const [progressOpen, setProgressOpen] = useState(
+    () => localStorage.getItem('mlp.diario.progress') !== 'closed'
+  )
+  const toggleProgress = () =>
+    setProgressOpen((o) => {
+      const next = !o
+      localStorage.setItem('mlp.diario.progress', next ? 'open' : 'closed')
+      return next
+    })
   // espelha day.goals num estado local pra refletir tanto edição manual (onBlur)
   // quanto o preenchimento vindo da IA, sem salvar a cada tecla digitada
   const [macroForm, setMacroForm] = useState(day.goals)
@@ -467,13 +480,130 @@ function DiarioTab({ pendingAction, consumeAction }) {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <GoalSummary />
+  // Conteúdo do painel de progresso (reaproveitado no painel lateral do desktop
+  // e no bloco inline do mobile). O cabeçalho com os botões fica em cada local.
+  const progressBody = (
+    <>
+      {day.goals._periodized && (
+        <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+          <CalendarRange size={12} /> Meta periodizada para hoje ({day.goals.calories} kcal · base {day.goals._baseCalories})
+        </div>
+      )}
+      <MacroProgress
+        totals={day.totals}
+        goals={day.goals}
+        water={{ total: day.waterTotal, goal: day.goals.water_ml_goal }}
+        onAddWater={day.addWater}
+        onUndoWater={day.removeLastWater}
+      />
 
-      {/* entrada (2/3) + progresso do dia (1/3), mesma altura por serem os 2 únicos itens da linha */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className={`${card} lg:col-span-2`}>
+      {/* atividade do dia: calorias gastas (das atividades concluídas na
+          Agenda) + passos (manual). Só informativo — não mexe na meta de
+          ingestão. */}
+      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 dark:border-ink-800">
+        <div className="rounded-xl bg-orange-50 p-3 dark:bg-orange-900/30">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+            <Flame size={14} /> Calorias gastas
+          </div>
+          <div className="mt-1 text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">
+            {health.caloriesBurned != null ? health.caloriesBurned : '—'}
+            <span className="ml-1 text-xs font-normal text-slate-400">kcal</span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+            das atividades concluídas
+          </div>
+        </div>
+
+        <StepsCard health={health} date={date} />
+      </div>
+
+      {goalsOpen && (
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-ink-800">
+          <button
+            onClick={genGoalsWithAI}
+            disabled={goalsAiBusy}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-60 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300"
+          >
+            <Sparkles size={13} /> {goalsAiBusy ? 'Calculando…' : 'Gerar metas com IA'}
+          </button>
+          {goalsNote && <p className="text-xs text-slate-500 dark:text-slate-400">{goalsNote}</p>}
+
+          {[
+            ['calories', 'Calorias (kcal)'],
+            ['protein_g', 'Proteína (g)'],
+            ['carbs_g', 'Carboidrato (g)'],
+            ['fat_g', 'Gordura (g)'],
+            ['water_ml_goal', 'Água (ml)'],
+          ].map(([k, label]) => (
+            <label key={k} className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+              {label}
+              <input
+                type="number"
+                value={macroForm[k]}
+                onChange={(e) => setMacroForm((f) => ({ ...f, [k]: e.target.value }))}
+                onBlur={(e) => day.saveGoals({ [k]: Number(e.target.value) || 0 })}
+                className={`${inputCls} w-24 text-right`}
+              />
+            </label>
+          ))}
+
+          {/* distribuição da meta diária entre as refeições (%) */}
+          <MealSplitEditor goals={day.goals} saveGoals={day.saveGoals} />
+
+          <label className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+            Objetivo
+            <select
+              defaultValue={day.goals.goal_type}
+              onChange={(e) => day.saveGoals({ goal_type: e.target.value })}
+              className={`${inputCls} w-32`}
+            >
+              <option value="cutting">Cutting</option>
+              <option value="manutencao">Manutenção</option>
+              <option value="bulking">Bulking</option>
+            </select>
+          </label>
+        </div>
+      )}
+    </>
+  )
+
+  // Botão "Metas" (abre/fecha o editor de metas dentro do painel).
+  const metasToggle = (
+    <button
+      onClick={() => setGoalsOpen((o) => !o)}
+      aria-expanded={goalsOpen}
+      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+        goalsOpen
+          ? 'bg-brand-500 text-white'
+          : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-400'
+      }`}
+    >
+      <Target size={13} /> Metas
+      <ChevronDown size={13} className={`transition-transform ${goalsOpen ? 'rotate-180' : ''}`} />
+    </button>
+  )
+
+  return (
+    <div className="flex gap-6">
+      {/* coluna principal do diário */}
+      <div className="min-w-0 flex-1 space-y-6">
+        <GoalSummary />
+
+        {/* botão para reabrir o painel quando fechado (só desktop) */}
+        {!progressOpen && (
+          <div className="hidden justify-end lg:flex">
+            <button
+              onClick={toggleProgress}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-500 shadow-card transition hover:border-brand-400 hover:text-brand-600 dark:border-ink-700 dark:bg-ink-900 dark:text-slate-400"
+              title="Mostrar progresso do dia"
+            >
+              <PanelRightOpen size={16} /> Progresso do dia
+            </button>
+          </div>
+        )}
+
+        {/* entrada de refeição */}
+        <div className={card}>
           <div className="mb-3 flex items-center justify-between">
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
             <span className="text-xs text-slate-400">{formatDateBR(date)}</span>
@@ -524,186 +654,120 @@ function DiarioTab({ pendingAction, consumeAction }) {
           </div>
         </div>
 
-        <div className={card}>
+        {/* progresso do dia (mobile): inline, sempre visível, sem sticky */}
+        <div className={`${card} lg:hidden`}>
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</h3>
-            <button
-              onClick={() => setGoalsOpen((o) => !o)}
-              aria-expanded={goalsOpen}
-              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                goalsOpen
-                  ? 'bg-brand-500 text-white'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-400'
-              }`}
-            >
-              <Target size={13} /> Metas
-              <ChevronDown size={13} className={`transition-transform ${goalsOpen ? 'rotate-180' : ''}`} />
-            </button>
+            {metasToggle}
           </div>
-          {day.goals._periodized && (
-            <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
-              <CalendarRange size={12} /> Meta periodizada para hoje ({day.goals.calories} kcal · base {day.goals._baseCalories})
-            </div>
-          )}
-          <MacroProgress
-            totals={day.totals}
-            goals={day.goals}
-            water={{ total: day.waterTotal, goal: day.goals.water_ml_goal }}
-            onAddWater={day.addWater}
-            onUndoWater={day.removeLastWater}
-          />
+          {progressBody}
+        </div>
 
-          {/* atividade do dia: calorias gastas (das atividades concluídas na
-              Agenda) + passos (manual). Só informativo — não mexe na meta de
-              ingestão. */}
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 dark:border-ink-800">
-            <div className="rounded-xl bg-orange-50 p-3 dark:bg-orange-900/30">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-300">
-                <Flame size={14} /> Calorias gastas
-              </div>
-              <div className="mt-1 text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                {health.caloriesBurned != null ? health.caloriesBurned : '—'}
-                <span className="ml-1 text-xs font-normal text-slate-400">kcal</span>
-              </div>
-              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                das atividades concluídas
-              </div>
-            </div>
-
-            <StepsCard health={health} date={date} />
+        {/* refeições do dia — cada uma com sua meta de calorias (fatia da meta
+            diária) e barra de progresso própria; grade responsiva */}
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Refeições do dia
+            </h3>
+            <span className="text-xs text-slate-400">meta de cada refeição = fatia da meta diária</span>
           </div>
-
-          {goalsOpen && (
-            <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-ink-800">
-              <button
-                onClick={genGoalsWithAI}
-                disabled={goalsAiBusy}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-60 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300"
-              >
-                <Sparkles size={13} /> {goalsAiBusy ? 'Calculando…' : 'Gerar metas com IA'}
-              </button>
-              {goalsNote && <p className="text-xs text-slate-500 dark:text-slate-400">{goalsNote}</p>}
-
-              {[
-                ['calories', 'Calorias (kcal)'],
-                ['protein_g', 'Proteína (g)'],
-                ['carbs_g', 'Carboidrato (g)'],
-                ['fat_g', 'Gordura (g)'],
-                ['water_ml_goal', 'Água (ml)'],
-              ].map(([k, label]) => (
-                <label key={k} className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
-                  {label}
-                  <input
-                    type="number"
-                    value={macroForm[k]}
-                    onChange={(e) => setMacroForm((f) => ({ ...f, [k]: e.target.value }))}
-                    onBlur={(e) => day.saveGoals({ [k]: Number(e.target.value) || 0 })}
-                    className={`${inputCls} w-24 text-right`}
-                  />
-                </label>
-              ))}
-
-              {/* distribuição da meta diária entre as refeições (%) */}
-              <MealSplitEditor goals={day.goals} saveGoals={day.saveGoals} />
-
-              <label className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
-                Objetivo
-                <select
-                  defaultValue={day.goals.goal_type}
-                  onChange={(e) => day.saveGoals({ goal_type: e.target.value })}
-                  className={`${inputCls} w-32`}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {MEALS.map((m) => {
+              const rows = day.byMeal[m] ?? []
+              const consumed = Math.round(day.mealTotals[m] ?? 0)
+              const target = day.mealGoals[m] ?? 0
+              const over = target > 0 && consumed > target
+              const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
+              const active = meal === m
+              return (
+                <div
+                  key={m}
+                  className={`${card} flex flex-col ${active ? 'ring-2 ring-brand-400 dark:ring-brand-500' : ''}`}
                 >
-                  <option value="cutting">Cutting</option>
-                  <option value="manutencao">Manutenção</option>
-                  <option value="bulking">Bulking</option>
-                </select>
-              </label>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* refeições do dia — cada uma com sua meta de calorias (fatia da meta
-          diária) e barra de progresso própria; grade responsiva */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            Refeições do dia
-          </h3>
-          <span className="text-xs text-slate-400">meta de cada refeição = fatia da meta diária</span>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {MEALS.map((m) => {
-            const rows = day.byMeal[m] ?? []
-            const consumed = Math.round(day.mealTotals[m] ?? 0)
-            const target = day.mealGoals[m] ?? 0
-            const pct = target > 0 ? Math.min(100, Math.round((consumed / target) * 100)) : 0
-            const over = target > 0 && consumed > target
-            const Icon = MEAL_ICONS[m] ?? UtensilsCrossed
-            const active = meal === m
-            return (
-              <div
-                key={m}
-                className={`${card} flex flex-col ${active ? 'ring-2 ring-brand-400 dark:ring-brand-500' : ''}`}
-              >
-                {/* cabeçalho clicável: seleciona a refeição pro campo de IA acima */}
-                <button
-                  onClick={() => setMeal(m)}
-                  title={`Lançar em ${m}`}
-                  className="mb-2 flex items-center justify-between text-left"
-                >
-                  <span className="flex items-center gap-2 font-display font-bold text-slate-800 dark:text-slate-100">
-                    <Icon size={16} className="text-slate-400" /> {m}
-                  </span>
-                  <span className={`tnum text-sm font-semibold ${over ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
-                    {consumed}
-                    <span className="text-slate-400"> / {target || '—'} kcal</span>
-                  </span>
-                </button>
-
-                {/* barra de progresso da refeição */}
-                <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
-                  <div
-                    className={`h-full rounded-full transition-all ${over ? 'bg-coral' : MEAL_ACCENT[m] ?? 'bg-brand-500'}`}
-                    style={{ width: `${target > 0 ? Math.min(100, (consumed / target) * 100) : 0}%` }}
-                  />
-                </div>
-                {over && (
-                  <p className="-mt-2 mb-2 text-[11px] font-medium text-coral">
-                    {consumed - target} kcal acima da meta desta refeição
-                  </p>
-                )}
-
-                {/* entradas da refeição */}
-                {rows.length ? (
-                  <ul className="flex-1 divide-y divide-slate-100 dark:divide-ink-800/60">
-                    {rows.map((l) => (
-                      <li key={l.id} className="flex items-center justify-between py-2 text-sm">
-                        <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{l.description}</span>
-                        <div className="ml-2 flex shrink-0 items-center gap-2">
-                          <span className="tnum text-xs text-slate-400">
-                            {Math.round(Number(l.calories))} kcal
-                          </span>
-                          <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
+                  {/* cabeçalho clicável: seleciona a refeição pro campo de IA acima */}
                   <button
                     onClick={() => setMeal(m)}
-                    className="flex-1 rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 transition hover:border-brand-300 hover:text-brand-500 dark:border-ink-700 dark:hover:border-brand-700"
+                    title={`Lançar em ${m}`}
+                    className="mb-2 flex items-center justify-between text-left"
                   >
-                    Nada lançado — clique e descreva o que comeu acima
+                    <span className="flex items-center gap-2 font-display font-bold text-slate-800 dark:text-slate-100">
+                      <Icon size={16} className="text-slate-400" /> {m}
+                    </span>
+                    <span className={`tnum text-sm font-semibold ${over ? 'text-coral' : 'text-slate-500 dark:text-slate-400'}`}>
+                      {consumed}
+                      <span className="text-slate-400"> / {target || '—'} kcal</span>
+                    </span>
                   </button>
-                )}
-              </div>
-            )
-          })}
+
+                  {/* barra de progresso da refeição */}
+                  <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ink-800">
+                    <div
+                      className={`h-full rounded-full transition-all ${over ? 'bg-coral' : MEAL_ACCENT[m] ?? 'bg-brand-500'}`}
+                      style={{ width: `${target > 0 ? Math.min(100, (consumed / target) * 100) : 0}%` }}
+                    />
+                  </div>
+                  {over && (
+                    <p className="-mt-2 mb-2 text-[11px] font-medium text-coral">
+                      {consumed - target} kcal acima da meta desta refeição
+                    </p>
+                  )}
+
+                  {/* entradas da refeição */}
+                  {rows.length ? (
+                    <ul className="flex-1 divide-y divide-slate-100 dark:divide-ink-800/60">
+                      {rows.map((l) => (
+                        <li key={l.id} className="flex items-center justify-between py-2 text-sm">
+                          <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{l.description}</span>
+                          <div className="ml-2 flex shrink-0 items-center gap-2">
+                            <span className="tnum text-xs text-slate-400">
+                              {Math.round(Number(l.calories))} kcal
+                            </span>
+                            <button onClick={() => day.removeLog(l.id)} className="rounded p-1 text-slate-400 hover:text-coral">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <button
+                      onClick={() => setMeal(m)}
+                      className="flex-1 rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400 transition hover:border-brand-300 hover:text-brand-500 dark:border-ink-700 dark:hover:border-brand-700"
+                    >
+                      Nada lançado — clique e descreva o que comeu acima
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
+
+      {/* painel lateral direito: Progresso do dia — trava na viewport, abre/fecha */}
+      {progressOpen && (
+        <aside className="hidden w-80 shrink-0 lg:block">
+          <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto">
+            <div className={card}>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="font-display font-bold text-slate-800 dark:text-slate-100">Progresso do dia</h3>
+                <div className="flex items-center gap-1">
+                  {metasToggle}
+                  <button
+                    onClick={toggleProgress}
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-ink-800"
+                    title="Recolher painel"
+                  >
+                    <PanelRightClose size={16} />
+                  </button>
+                </div>
+              </div>
+              {progressBody}
+            </div>
+          </div>
+        </aside>
+      )}
     </div>
   )
 }

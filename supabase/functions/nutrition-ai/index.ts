@@ -348,24 +348,34 @@ function extractJson(text) {
   throw new Error('JSON incompleto na resposta da IA')
 }
 
-async function chatOnce(systemPrompt, userPrompt) {
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://my-finance-pal.vercel.app',
-      'X-Title': 'My Life Pal - Nutricao',
-    },
-    body: JSON.stringify({
-      model: 'openrouter/free',
-      temperature: 0.4,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  })
+async function chatOnce(systemPrompt, userPrompt, maxTokens = 1200) {
+  const doFetch = (includeMaxTokens) =>
+    fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://my-life-pal.vercel.app',
+        'X-Title': 'My Life Pal - Nutricao',
+      },
+      body: JSON.stringify({
+        model: 'openrouter/free',
+        temperature: 0.4,
+        ...(includeMaxTokens && maxTokens ? { max_tokens: maxTokens } : {}),
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      }),
+    })
+
+  let resp = await doFetch(true)
+  // Alguns modelos gratuitos rejeitam max_tokens (ou o valor) com 400.
+  // Nesse caso, reenvia uma vez sem o parâmetro em vez de falhar de vez.
+  if (resp.status === 400 && maxTokens) {
+    console.warn('OpenRouter 400 com max_tokens; reenviando sem o parâmetro')
+    resp = await doFetch(false)
+  }
   if (!resp.ok) {
     const body = await resp.text()
     throw new Error(`OpenRouter ${resp.status}: ${body.slice(0, 300)}`)
@@ -379,7 +389,7 @@ async function chatOnce(systemPrompt, userPrompt) {
 // (com um lembrete mais forte) resolve a maioria dos casos — não dá pra
 // forçar um schema de verdade (tipo Pydantic) num modelo gratuito que
 // muda a cada chamada, mas o retry cobre o caso comum de forma barata.
-async function chatJSON(systemPrompt, userPrompt, retries = 2) {
+async function chatJSON(systemPrompt, userPrompt, retries = 2, maxTokens = 1200) {
   let lastError
   for (let attempt = 0; attempt <= retries; attempt++) {
     const prompt =
@@ -387,7 +397,7 @@ async function chatJSON(systemPrompt, userPrompt, retries = 2) {
         ? userPrompt
         : `${userPrompt}\n\n(Sua resposta anterior não veio em JSON válido ou veio incompleta. Responda de novo, ESTRITAMENTE e SOMENTE com o objeto JSON pedido — nenhum texto, explicação ou markdown antes ou depois.)`
     try {
-      const content = await chatOnce(systemPrompt, prompt)
+      const content = await chatOnce(systemPrompt, prompt, maxTokens)
       return extractJson(content)
     } catch (e) {
       lastError = e
@@ -543,42 +553,57 @@ async function invokeOpenRouter(action, payload) {
       const { age, height_cm, weight_kg, activities, target_weight, target_date } = payload ?? {}
       const activityText =
         Array.isArray(activities) && activities.length
-          ? `Atividades físicas registradas na Agenda desta semana: ${activities.map((a) => `${a.count}x ${a.category}`).join(', ')}.`
-          : 'Nenhuma atividade registrada na Agenda esta semana.'
+          ? `Atividades na Agenda esta semana: ${activities.map((a) => `${a.count}x ${a.category}`).join(', ')}.`
+          : 'Nenhuma atividade na Agenda esta semana.'
       const bioText =
-        `Dados de Medidas do app — Idade: ${age ?? '?'} anos. Peso: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ` +
+        `Dados de Medidas — Idade: ${age ?? '?'} anos. Peso: ${weight_kg ?? '?'} kg. Altura: ${height_cm ?? '?'} cm. ` +
         `Meta de peso: ${target_weight ?? 'não definida'}${target_date ? ` até ${target_date}` : ''}. ${activityText}`
+      const context = bioText + buildProfileText(payload?.profile)
 
-      const json = await chatJSON(
-        'Você é um nutricionista esportivo baseado em evidência. Produza uma ANÁLISE NUTRICIONAL INDIVIDUALIZADA a partir da anamnese ' +
-          'do usuário (PERFIL abaixo) e dos dados de Medidas/Agenda. Siga estas regras com rigor:\n' +
-          '1. HONESTIDADE: separe o que foi MEDIDO do que foi ESTIMADO. Enquadre como hipótese inicial a calibrar, NÃO prescrição médica.\n' +
-          '2. NÃO invente dados ausentes; liste-os como lacunas. Campos ausentes no perfil são lacunas reais.\n' +
-          '3. TMB por Mifflin-St Jeor: escreva a equação com os números do usuário. Homens: 10*peso+6.25*altura-5*idade+5; Mulheres: 10*peso+6.25*altura-5*idade-161. Se faltar sexo, calcule os dois e explique.\n' +
-          '4. TDEE = TMB * fator de atividade (1.2 sedentário a 1.9 muito ativo), escolhido pela rotina; declare o fator e a incerteza (±10-20%).\n' +
-          '5. Ajuste pela meta: hipertrofia +10-15%; perda de gordura -15-25% (máx ~1%/semana); recomposição ~manutenção.\n' +
-          '6. Proteína: 1.6 g/kg é o platô, 2.2 g/kg o teto (Morton 2018, doi:10.1136/bjsports-2017-097608); distribua >=0.4 g/kg por refeição.\n' +
-          '7. Carboidrato periodizado por dia: mais nos dias de treino intenso/endurance, menos no descanso. Gordura: piso ~0.8 g/kg.\n' +
-          '8. TABELA POR DIA DA SEMANA (0=Segunda..6=Domingo): para CADA dia, casar com o treino daquele dia (da rotina do perfil), definindo kcal, proteína, carbo e gordura. Dias de corrida/treino pesado sobem (mais carbo); descanso desce.\n' +
-          '9. TRIAGEM DE SEGURANÇA: se houver doença renal, diabetes tipo 1/insulina, gestação/amamentação, histórico de transtorno alimentar, IMC<18.5 com meta de perda, ou menor de 18 — sinalize em "safety" e recomende acompanhamento; não prescreva restrição.\n' +
-          'Responda ESTRITAMENTE com JSON válido, sem markdown, neste formato:\n' +
-          '{' +
-          '"headline":"decisão central em 1-2 frases (ex: começar em ~2200 kcal/dia na média, mais carbo nos dias de corrida)",' +
-          '"energy":{"tmb":0,"tmb_equation":"10*60+6.25*172-5*30-161 = 1364 kcal","tmb_method":"Mifflin-St Jeor (mulheres)","activity_factor":1.5,"tdee":0,"tdee_note":"estimado por TMB*fator; ±15%"},' +
-          '"goal":{"type":"hipertrofia|perda_gordura|recomposicao|manutencao","adjustment":"+12% sobre o TDEE","target_avg_calories":0},' +
-          '"weekly":[{"weekday":0,"day":"Segunda","training":"Corrida 5-7km","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"note":"mais carbo pré-corrida"}],' +
-          '"weekly_avg_calories":0,' +
-          '"protein":{"target_g_per_kg":1.8,"total_g":0,"per_meal_g":0,"rationale":"1.6-2.2 g/kg (Morton 2018)"},' +
-          '"supplements":[{"name":"Creatina","dose":"3-5 g/dia","rationale":"evidência forte p/ força"}],' +
-          '"calibration":["média móvel semanal de peso (nunca peso pontual)","peso estável em hipertrofia -> +150-200 kcal de carbo"],' +
-          '"gaps":["dado ausente 1","dado ausente 2"],' +
-          '"safety":["ressalva de segurança ou string vazia se nenhuma"],' +
-          '"references":[{"label":"Morton et al. 2018","doi":"10.1136/bjsports-2017-097608"}],' +
-          '"disclaimer":"Material educacional; não substitui avaliação individual por nutricionista/médico."' +
-          '}. ' +
-          'A tabela "weekly" DEVE ter 7 itens (weekday 0 a 6). Valores numéricos inteiros para kcal/macros. Só cite DOI que realmente usou.',
-        bioText + buildProfileText(payload?.profile),
-      )
+      // O prompt único, pedindo um JSON enorme (12 chaves aninhadas), fazia o
+      // modelo gratuito devolver texto sem JSON ("Resposta da IA não trouxe
+      // JSON"). Dividido em 2 chamadas menores paralelas, cada uma pede um
+      // JSON pequeno que o modelo produz de forma confiável.
+
+      // ── A: núcleo (energia, objetivo, tabela semanal, proteína) ──
+      const coreP = chatJSON(
+        'Você é nutricionista esportivo baseado em evidência. Analise o perfil e responda SÓ JSON válido, sem markdown. ' +
+          'TMB por Mifflin-St Jeor (homem: 10*p+6.25*a-5*i+5; mulher: 10*p+6.25*a-5*i-161) — escreva a conta. ' +
+          'TDEE = TMB * fator(1.2 a 1.9) conforme a rotina. Ajuste pela meta (hipertrofia +10-15%, perda -15-25%). ' +
+          'Periodize as calorias por dia da semana pelo treino de cada dia (treino pesado/corrida sobe com mais carbo; descanso desce). ' +
+          'Proteína 1.6-2.2 g/kg. NÃO é prescrição médica. Formato EXATO:\n' +
+          '{"headline":"1-2 frases","energy":{"tmb":0,"tmb_equation":"...","tmb_method":"Mifflin-St Jeor","activity_factor":1.5,"tdee":0,"tdee_note":"±15%"},' +
+          '"goal":{"type":"hipertrofia|perda_gordura|recomposicao|manutencao","adjustment":"+12%","target_avg_calories":0},' +
+          '"weekly":[{"weekday":0,"day":"Segunda","training":"...","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"note":"..."}],' +
+          '"weekly_avg_calories":0,"protein":{"target_g_per_kg":1.8,"total_g":0,"per_meal_g":0,"rationale":"..."}}. ' +
+          'weekly DEVE ter os 7 dias (weekday 0=Segunda a 6=Domingo). Números inteiros.',
+        context,
+        1,
+        900,
+      ).catch((e) => ({ _error: String(e?.message ?? e) }))
+
+      // ── B: complementos (suplementos, calibração, lacunas, segurança, refs) ──
+      const extraP = chatJSON(
+        'Você é nutricionista esportivo baseado em evidência. Com base no perfil, responda SÓ JSON válido, sem markdown. ' +
+          'Liste lacunas (dados ausentes no perfil). Em "safety", sinalize doença renal, diabetes tipo 1/insulina, gestação/amamentação, ' +
+          'transtorno alimentar, IMC<18.5 com meta de perda, ou menor de 18 — recomendando acompanhamento; senão deixe []. ' +
+          'Só cite DOI que realmente usou (ex: Morton 2018 doi:10.1136/bjsports-2017-097608). Formato EXATO:\n' +
+          '{"supplements":[{"name":"Creatina","dose":"3-5 g/dia","rationale":"..."}],' +
+          '"calibration":["média móvel semanal de peso","..."],' +
+          '"gaps":["dado ausente 1"],"safety":[],' +
+          '"references":[{"label":"Morton et al. 2018","doi":"10.1136/bjsports-2017-097608"}]}',
+        context,
+        1,
+        700,
+      ).catch((e) => ({ _error: String(e?.message ?? e) }))
+
+      const [core, extra] = await Promise.all([coreP, extraP])
+
+      // Se AMBAS falharam, propaga o erro (não entrega uma casca vazia).
+      if (core?._error && extra?._error) {
+        throw new Error(core._error)
+      }
+      const json = { ...(core?._error ? {} : core), ...(extra?._error ? {} : extra) }
 
       // Normaliza a tabela semanal: garante 7 dias 0..6, números inteiros.
       const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
@@ -614,10 +639,8 @@ async function invokeOpenRouter(action, payload) {
         gaps: Array.isArray(json.gaps) ? json.gaps : [],
         safety: Array.isArray(json.safety) ? json.safety.filter((s: string) => s && s.trim()) : [],
         references: Array.isArray(json.references) ? json.references : [],
-        disclaimer:
-          typeof json.disclaimer === 'string' && json.disclaimer
-            ? json.disclaimer
-            : 'Material educacional; não substitui avaliação individual por nutricionista ou médico.',
+        disclaimer: 'Material educacional; não substitui avaliação individual por nutricionista ou médico.',
+        partial: Boolean(core?._error || extra?._error) || undefined,
         generated_at: new Date().toISOString(),
       }
     }
